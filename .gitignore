@@ -1,0 +1,25 @@
+# Build output
+/target
+/build
+/pkg
+
+# Dependencies
+node_modules/
+
+# Wrangler
+.wrangler/
+.dev.vars
+wrangler.local.toml
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+Cargo.lock

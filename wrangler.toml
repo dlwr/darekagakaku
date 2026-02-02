@@ -1,0 +1,12 @@
+name = "darekagakaku"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-02-02"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "darekagakaku-db"
+# database_id は環境変数または wrangler.local.toml で設定
+# npx wrangler d1 create darekagakaku-db で作成後、IDを設定してください

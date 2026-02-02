@@ -1,0 +1,135 @@
+use worker::d1::D1Database;
+use worker::{Request, Response, Result, RouteContext};
+
+use crate::db;
+use crate::models::{
+    CreateDiaryRequest, DiaryEntrySummary, DiaryEntryResponse, DiaryListResponse,
+    ErrorResponse, TodayEmptyResponse,
+};
+use crate::time::{is_today, is_valid_date, today_jst};
+
+const MAX_CONTENT_LENGTH: usize = 10000;
+
+/// GET /api/today - 今日の日記を取得
+pub async fn get_today(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let db: D1Database = ctx.env.d1("DB")?;
+    let today = today_jst();
+
+    match db::get_entry(&db, &today).await {
+        Ok(Some(entry)) => {
+            let response = DiaryEntryResponse::from_entry(&entry, true);
+            Response::from_json(&response)
+        }
+        Ok(None) => {
+            let response = TodayEmptyResponse {
+                date: today,
+                content: None,
+                can_edit: true,
+            };
+            Response::from_json(&response)
+        }
+        Err(e) => {
+            worker::console_error!("Failed to get today's entry: {:?}", e);
+            Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| r.with_status(500))
+        }
+    }
+}
+
+/// POST /api/today - 今日の日記を作成/更新
+pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let db: D1Database = ctx.env.d1("DB")?;
+
+    // リクエストボディをパース
+    let body: CreateDiaryRequest = match req.json().await {
+        Ok(body) => body,
+        Err(_) => {
+            return Response::from_json(&ErrorResponse::bad_request("Invalid JSON"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    // バリデーション: コンテンツの長さをチェック
+    if body.content.chars().count() > MAX_CONTENT_LENGTH {
+        return Response::from_json(&ErrorResponse::bad_request(format!(
+            "Content too long. Maximum {} characters allowed.",
+            MAX_CONTENT_LENGTH
+        )))
+        .map(|r| r.with_status(400));
+    }
+
+    // 今日の日記を作成/更新
+    match db::upsert_today_entry(&db, &body.content).await {
+        Ok(()) => {
+            let today = today_jst();
+            let response = DiaryEntryResponse {
+                date: today,
+                content: body.content,
+                can_edit: true,
+            };
+            Response::from_json(&response).map(|r| r.with_status(201))
+        }
+        Err(e) => {
+            worker::console_error!("Failed to save entry: {:?}", e);
+            Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| r.with_status(500))
+        }
+    }
+}
+
+/// GET /api/entries - 過去の日記一覧を取得
+pub async fn get_entries(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let db: D1Database = ctx.env.d1("DB")?;
+
+    match db::list_past_entries(&db, 100).await {
+        Ok(entries) => {
+            let summaries: Vec<DiaryEntrySummary> = entries
+                .iter()
+                .map(DiaryEntrySummary::from_entry)
+                .collect();
+            let response = DiaryListResponse { entries: summaries };
+            Response::from_json(&response)
+        }
+        Err(e) => {
+            worker::console_error!("Failed to list entries: {:?}", e);
+            Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| r.with_status(500))
+        }
+    }
+}
+
+/// GET /api/entries/:date - 特定日の日記を取得
+pub async fn get_entry_by_date(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let db: D1Database = ctx.env.d1("DB")?;
+
+    let date = match ctx.param("date") {
+        Some(d) => d,
+        None => {
+            return Response::from_json(&ErrorResponse::bad_request("Date parameter required"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    // 日付の形式を検証
+    if !is_valid_date(date) {
+        return Response::from_json(&ErrorResponse::bad_request("Invalid date format. Use YYYY-MM-DD."))
+            .map(|r| r.with_status(400));
+    }
+
+    match db::get_entry(&db, date).await {
+        Ok(Some(entry)) => {
+            let can_edit = is_today(date);
+            let response = DiaryEntryResponse::from_entry(&entry, can_edit);
+            Response::from_json(&response)
+        }
+        Ok(None) => {
+            Response::from_json(&ErrorResponse::not_found())
+                .map(|r| r.with_status(404))
+        }
+        Err(e) => {
+            worker::console_error!("Failed to get entry: {:?}", e);
+            Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| r.with_status(500))
+        }
+    }
+}
