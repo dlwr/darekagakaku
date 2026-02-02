@@ -136,6 +136,7 @@ fn html_nav() -> &'static str {
     r#"<nav>
         <a href="/">今日の日記を書く</a>
         <a href="/entries">過去の日記</a>
+        <a href="/a">これはなにか</a>
     </nav>"#
 }
 
@@ -236,6 +237,27 @@ pub fn render_not_found() -> String {
     <p class="empty">この日の日記は存在しません。</p>
 {footer}"#,
         head = html_head("見つかりません"),
+        nav = html_nav(),
+        footer = html_footer()
+    )
+}
+
+/// Aboutページ（これはなにか）
+pub fn render_about() -> String {
+    format!(
+        r#"{head}
+    {nav}
+    <h1>これはなにか</h1>
+    <div class="content">
+        <p>「自分が書かなければおそらく誰かが書く日記」</p>
+        <p>ここでは日記をつけることができます。しかしその日記は日付がかわるその瞬間までインターネットにアクセスできるすべての存在（それは人間とも限りません）が書くことができます。</p>
+        <p>どこかの誰か（重ねていいますがそれは人間とは限りません）が書き残したものを跡形もなく消し去って、今まさにテクストエリアにフォーカスを持っている存在のその瞬間を記録することができます。どんな美しい言葉でさえも今という瞬間に存在する言葉を超えることはできないのです。</p>
+        <p>たとえそれがどんなに汚ない言葉でも例外はありません。</p>
+        <p>日付を越えるという経験をした言葉は（スーパーユーザではない限り）2度と手をいれることのできない存在になります。</p>
+    </div>
+    <p style="text-align: right; margin-top: 20px;"><a href="/">トップ</a></p>
+{footer}"#,
+        head = html_head("これはなにか"),
         nav = html_nav(),
         footer = html_footer()
     )

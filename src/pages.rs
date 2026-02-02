@@ -6,6 +6,12 @@ use crate::models::DiaryEntrySummary;
 use crate::templates;
 use crate::time::{is_today, is_valid_date, today_jst};
 
+/// GET /a - Aboutページ（これはなにか）
+pub async fn about(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    let html = templates::render_about();
+    Response::from_html(html)
+}
+
 const MAX_CONTENT_LENGTH: usize = 10000;
 
 /// GET / - ホームページ（今日の日記フォーム）
