@@ -1,13 +1,22 @@
 use crate::models::{DiaryEntry, DiaryEntrySummary};
 use crate::time::today_jst;
 
-/// HTMLをエスケープする
-fn escape_html(s: &str) -> String {
+/// 共通のエスケープ処理（HTML/XML両方で使用）
+fn escape_common(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
+}
+
+/// XMLをエスケープする
+fn escape_xml(s: &str) -> String {
+    escape_common(s).replace('\'', "&apos;")
+}
+
+/// HTMLをエスケープする
+fn escape_html(s: &str) -> String {
+    escape_common(s).replace('\'', "&#x27;")
 }
 
 /// 共通のHTMLヘッダー
@@ -19,6 +28,7 @@ fn html_head(title: &str) -> String {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title} - 誰かが書く日記</title>
+    <link rel="alternate" type="application/rss+xml" title="誰かが書く日記 RSS" href="/feed">
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{
@@ -137,6 +147,7 @@ fn html_nav() -> &'static str {
         <a href="/">今日の日記を書く</a>
         <a href="/entries">過去の日記</a>
         <a href="/a">これはなにか</a>
+        <a href="/feed">RSS</a>
     </nav>"#
 }
 
@@ -261,4 +272,164 @@ pub fn render_about() -> String {
         nav = html_nav(),
         footer = html_footer()
     )
+}
+
+/// RSSフィードを生成
+pub fn render_rss(entries: &[DiaryEntry], base_url: &str) -> String {
+    let items: Vec<String> = entries
+        .iter()
+        .map(|entry| {
+            let description = if entry.content.chars().count() > 200 {
+                let preview: String = entry.content.chars().take(200).collect();
+                format!("{}...", preview)
+            } else {
+                entry.content.clone()
+            };
+
+            format!(
+                r#"    <item>
+      <title>{date}の日記</title>
+      <link>{base_url}/entries/{date}</link>
+      <guid>{base_url}/entries/{date}</guid>
+      <pubDate>{pub_date}</pubDate>
+      <description>{description}</description>
+    </item>"#,
+                date = escape_xml(&entry.date),
+                base_url = base_url,
+                pub_date = date_to_rfc2822(&entry.date),
+                description = escape_xml(&description)
+            )
+        })
+        .collect();
+
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>誰かが書く日記</title>
+    <link>{base_url}</link>
+    <description>自分が書かなければおそらく誰かが書く日記</description>
+    <language>ja</language>
+{items}
+  </channel>
+</rss>"#,
+        base_url = base_url,
+        items = items.join("\n")
+    )
+}
+
+const MONTH_NAMES: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/// YYYY-MM-DD形式の日付をRFC2822形式に変換
+fn date_to_rfc2822(date: &str) -> String {
+    let parts: Vec<&str> = date.split('-').collect();
+    if parts.len() != 3 {
+        return date.to_string();
+    }
+
+    let year: i32 = parts[0].parse().unwrap_or(2025);
+    let month: u32 = parts[1].parse().unwrap_or(1);
+    let day: u32 = parts[2].parse().unwrap_or(1);
+
+    let month_name = MONTH_NAMES.get((month - 1) as usize).unwrap_or(&"Jan");
+    let weekday = calculate_weekday(year, month, day);
+    let weekday_name = WEEKDAY_NAMES.get(weekday as usize).unwrap_or(&"Sun");
+
+    format!(
+        "{}, {:02} {} {} 00:00:00 +0900",
+        weekday_name, day, month_name, year
+    )
+}
+
+/// 曜日を計算（0=日曜〜6=土曜）
+fn calculate_weekday(year: i32, month: u32, day: u32) -> u32 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let m = if month <= 2 { month + 12 } else { month };
+    let d = day as i32;
+
+    let q = y / 100;
+    let r = y % 100;
+
+    let h = (d + (13 * (m as i32 + 1)) / 5 + r + r / 4 + q / 4 - 2 * q) % 7;
+    ((h + 7) % 7) as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_rss_empty() {
+        let rss = render_rss(&[], "https://example.com");
+        assert!(rss.contains("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(rss.contains("<title>誰かが書く日記</title>"));
+        assert!(rss.contains("<link>https://example.com</link>"));
+    }
+
+    #[test]
+    fn test_render_rss_with_entries() {
+        let entries = vec![
+            DiaryEntry {
+                date: "2025-01-15".to_string(),
+                content: "今日はいい天気だった".to_string(),
+                created_at: "2025-01-15T10:00:00Z".to_string(),
+                updated_at: "2025-01-15T10:00:00Z".to_string(),
+            },
+        ];
+        let rss = render_rss(&entries, "https://example.com");
+        assert!(rss.contains("<title>2025-01-15の日記</title>"));
+        assert!(rss.contains("<link>https://example.com/entries/2025-01-15</link>"));
+        assert!(rss.contains("<description>今日はいい天気だった</description>"));
+    }
+
+    #[test]
+    fn test_render_rss_escapes_xml() {
+        let entries = vec![
+            DiaryEntry {
+                date: "2025-01-15".to_string(),
+                content: "<script>alert('xss')</script>".to_string(),
+                created_at: "2025-01-15T10:00:00Z".to_string(),
+                updated_at: "2025-01-15T10:00:00Z".to_string(),
+            },
+        ];
+        let rss = render_rss(&entries, "https://example.com");
+        assert!(rss.contains("&lt;script&gt;"));
+        assert!(!rss.contains("<script>"));
+    }
+
+    #[test]
+    fn test_render_rss_truncates_long_content() {
+        let long_content = "あ".repeat(300);
+        let entries = vec![
+            DiaryEntry {
+                date: "2025-01-15".to_string(),
+                content: long_content,
+                created_at: "2025-01-15T10:00:00Z".to_string(),
+                updated_at: "2025-01-15T10:00:00Z".to_string(),
+            },
+        ];
+        let rss = render_rss(&entries, "https://example.com");
+        // 200文字 + "..." = 203文字分のエスケープされた内容が含まれる
+        assert!(rss.contains("..."));
+    }
+
+    #[test]
+    fn test_date_to_rfc2822() {
+        let rfc = date_to_rfc2822("2025-01-15");
+        assert!(rfc.contains("Jan"));
+        assert!(rfc.contains("2025"));
+        assert!(rfc.contains("+0900"));
+    }
+
+    #[test]
+    fn test_escape_xml() {
+        assert_eq!(escape_xml("<test>"), "&lt;test&gt;");
+        assert_eq!(escape_xml("a & b"), "a &amp; b");
+        assert_eq!(escape_xml("\"quote\""), "&quot;quote&quot;");
+    }
 }

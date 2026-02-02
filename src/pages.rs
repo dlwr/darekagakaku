@@ -1,5 +1,5 @@
 use worker::d1::D1Database;
-use worker::{Request, Response, Result, RouteContext};
+use worker::{Headers, Request, Response, Result, RouteContext};
 
 use crate::db;
 use crate::models::DiaryEntrySummary;
@@ -122,4 +122,28 @@ pub async fn entry_page(_req: Request, ctx: RouteContext<()>) -> Result<Response
             Response::from_html(html).map(|r| r.with_status(500))
         }
     }
+}
+
+/// GET /feed - RSSフィード
+pub async fn feed(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let db: D1Database = ctx.env.d1("DB")?;
+
+    let entries = match db::list_all_entries(&db, 20).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            worker::console_error!("Failed to list entries for RSS: {:?}", e);
+            vec![]
+        }
+    };
+
+    // ベースURLをリクエストから取得
+    let url = req.url()?;
+    let base_url = format!("{}://{}", url.scheme(), url.host_str().unwrap_or("localhost"));
+
+    let rss = templates::render_rss(&entries, &base_url);
+
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/rss+xml; charset=utf-8")?;
+
+    Ok(Response::ok(rss)?.with_headers(headers))
 }

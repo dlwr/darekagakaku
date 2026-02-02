@@ -51,6 +51,7 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 |------|----------|------|
 | `/` | GET/POST | 今日の日記フォーム |
 | `/a` | GET | Aboutページ |
+| `/feed` | GET | RSSフィード |
 | `/entries` | GET | 過去の日記一覧 |
 | `/entries/:date` | GET | 特定日の日記 |
 | `/api/today` | GET/POST | 今日の日記API |
