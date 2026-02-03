@@ -351,7 +351,7 @@ pub fn render_rss(entries: &[DiaryEntry], base_url: &str) -> String {
     </item>"#,
                 date = escape_xml(&entry.date),
                 base_url = base_url,
-                pub_date = date_to_rfc2822(&entry.date),
+                pub_date = datetime_to_rfc2822(&entry.updated_at),
                 description = escape_xml(&description)
             )
         })
@@ -380,24 +380,44 @@ const MONTH_NAMES: [&str; 12] = [
 
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/// YYYY-MM-DD形式の日付をRFC2822形式に変換
-fn date_to_rfc2822(date: &str) -> String {
-    let parts: Vec<&str> = date.split('-').collect();
+/// ISO8601形式のタイムスタンプをRFC2822形式に変換
+fn datetime_to_rfc2822(datetime: &str) -> String {
+    // 例: "2025-01-15T10:30:45Z" or "2025-01-15T10:30:45+09:00"
+    // 最低限 "YYYY-MM-DDTHH:MM:SS" の部分をパース
+    if datetime.len() < 19 {
+        return datetime.to_string();
+    }
+
+    let date_part = &datetime[0..10];
+    let time_part = &datetime[11..19];
+
+    let parts: Vec<&str> = date_part.split('-').collect();
     if parts.len() != 3 {
-        return date.to_string();
+        return datetime.to_string();
     }
 
     let year: i32 = parts[0].parse().unwrap_or(2025);
     let month: u32 = parts[1].parse().unwrap_or(1);
     let day: u32 = parts[2].parse().unwrap_or(1);
 
+    let time_parts: Vec<&str> = time_part.split(':').collect();
+    let (hour, minute, second) = if time_parts.len() == 3 {
+        (
+            time_parts[0].parse().unwrap_or(0),
+            time_parts[1].parse().unwrap_or(0),
+            time_parts[2].parse().unwrap_or(0),
+        )
+    } else {
+        (0, 0, 0)
+    };
+
     let month_name = MONTH_NAMES.get((month - 1) as usize).unwrap_or(&"Jan");
     let weekday = calculate_weekday(year, month, day);
     let weekday_name = WEEKDAY_NAMES.get(weekday as usize).unwrap_or(&"Sun");
 
     format!(
-        "{}, {:02} {} {} 00:00:00 +0900",
-        weekday_name, day, month_name, year
+        "{}, {:02} {} {} {:02}:{:02}:{:02} +0900",
+        weekday_name, day, month_name, year, hour, minute, second
     )
 }
 
@@ -474,11 +494,18 @@ mod tests {
     }
 
     #[test]
-    fn test_date_to_rfc2822() {
-        let rfc = date_to_rfc2822("2025-01-15");
+    fn test_datetime_to_rfc2822() {
+        let rfc = datetime_to_rfc2822("2025-01-15T10:30:45Z");
         assert!(rfc.contains("Jan"));
         assert!(rfc.contains("2025"));
+        assert!(rfc.contains("10:30:45"));
         assert!(rfc.contains("+0900"));
+    }
+
+    #[test]
+    fn test_datetime_to_rfc2822_preserves_time() {
+        let rfc = datetime_to_rfc2822("2025-01-15T10:30:45Z");
+        assert_eq!(rfc, "Thu, 15 Jan 2025 10:30:45 +0900");
     }
 
     #[test]
