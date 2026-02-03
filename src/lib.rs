@@ -12,7 +12,6 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     Router::new()
         // HTMLページ
         .get_async("/", pages::home)
-        .post_async("/", pages::post_home)
         .get_async("/a", pages::about)
         .get_async("/feed", pages::feed)
         .get_async("/entries", pages::entries_list)

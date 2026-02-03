@@ -134,6 +134,32 @@ fn html_head(title: &str) -> String {
             padding: 40px;
             text-align: center;
         }}
+        .toast {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            background-color: #2ecc71;
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            font-size: 14px;
+            z-index: 1000;
+            animation: toast-slide-in 0.3s ease, toast-fade-out 0.3s ease 2.7s;
+            opacity: 0;
+            animation-fill-mode: forwards;
+        }}
+        .toast.error {{
+            background-color: #e74c3c;
+        }}
+        @keyframes toast-slide-in {{
+            from {{ transform: translateX(100%); opacity: 0; }}
+            to {{ transform: translateX(0); opacity: 1; }}
+        }}
+        @keyframes toast-fade-out {{
+            from {{ opacity: 1; }}
+            to {{ opacity: 0; }}
+        }}
     </style>
 </head>
 <body>"#,
@@ -166,12 +192,41 @@ pub fn render_home(entry: Option<&DiaryEntry>) -> String {
     {nav}
     <h1>誰かが書く日記</h1>
     <p class="date">{today}の日記</p>
-    <form method="POST" action="/">
+    <form id="diary-form">
         <textarea name="content" placeholder="今日の日記を書いてください...">{content}</textarea>
         <br>
         <button type="submit">保存する</button>
     </form>
     <p class="hint">0時（JST）になると編集できなくなります</p>
+    <script>
+    document.getElementById('diary-form').addEventListener('submit', function(e) {{
+        e.preventDefault();
+        var form = this;
+        var btn = form.querySelector('button');
+        btn.disabled = true;
+        btn.textContent = '保存中...';
+        fetch('/api/today', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ content: form.content.value }})
+        }}).then(function(res) {{
+            if (res.ok) {{
+                var toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.textContent = '保存しました';
+                document.body.appendChild(toast);
+                setTimeout(function() {{ toast.remove(); }}, 3000);
+            }} else {{
+                alert('保存に失敗しました');
+            }}
+        }}).catch(function() {{
+            alert('保存に失敗しました');
+        }}).finally(function() {{
+            btn.disabled = false;
+            btn.textContent = '保存する';
+        }});
+    }});
+    </script>
 {footer}"#,
         head = html_head("今日の日記"),
         nav = html_nav(),
@@ -431,5 +486,13 @@ mod tests {
         assert_eq!(escape_xml("<test>"), "&lt;test&gt;");
         assert_eq!(escape_xml("a & b"), "a &amp; b");
         assert_eq!(escape_xml("\"quote\""), "&quot;quote&quot;");
+    }
+
+    #[test]
+    fn test_toast_css_exists() {
+        let head = html_head("テスト");
+        assert!(head.contains(".toast {"));
+        assert!(head.contains("toast-slide-in"));
+        assert!(head.contains("toast-fade-out"));
     }
 }

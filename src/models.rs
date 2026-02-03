@@ -9,18 +9,6 @@ pub struct DiaryEntry {
     pub updated_at: String,
 }
 
-impl DiaryEntry {
-    pub fn new(date: String, content: String) -> Self {
-        let now = crate::time::now_iso8601();
-        Self {
-            date,
-            content,
-            created_at: now.clone(),
-            updated_at: now,
-        }
-    }
-}
-
 /// APIレスポンス用の日記エントリ
 #[derive(Debug, Serialize)]
 pub struct DiaryEntryResponse {

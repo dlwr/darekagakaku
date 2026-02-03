@@ -12,8 +12,6 @@ pub async fn about(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
     Response::from_html(html)
 }
 
-const MAX_CONTENT_LENGTH: usize = 10000;
-
 /// GET / - ホームページ（今日の日記フォーム）
 pub async fn home(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;
@@ -29,42 +27,6 @@ pub async fn home(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
 
     let html = templates::render_home(entry.as_ref());
     Response::from_html(html)
-}
-
-/// POST / - 今日の日記を保存してリダイレクト
-pub async fn post_home(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let db: D1Database = ctx.env.d1("DB")?;
-
-    // フォームデータをパース
-    let form_data = req.form_data().await?;
-    let content = match form_data.get("content") {
-        Some(worker::FormEntry::Field(value)) => value,
-        _ => String::new(),
-    };
-
-    // バリデーション
-    if content.chars().count() > MAX_CONTENT_LENGTH {
-        // エラーの場合はフォームを再表示（エラーメッセージ付き）
-        let html = format!(
-            r#"<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>エラー</title></head>
-<body><p>日記が長すぎます（最大{}文字）</p><a href="/">戻る</a></body></html>"#,
-            MAX_CONTENT_LENGTH
-        );
-        return Response::from_html(html).map(|r| r.with_status(400));
-    }
-
-    // 保存
-    if let Err(e) = db::upsert_today_entry(&db, &content).await {
-        worker::console_error!("Failed to save entry: {:?}", e);
-        let html = r#"<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>エラー</title></head>
-<body><p>保存に失敗しました</p><a href="/">戻る</a></body></html>"#;
-        return Response::from_html(html).map(|r| r.with_status(500));
-    }
-
-    // 成功したらホームにリダイレクト
-    Response::redirect_with_status(req.url()?, 303)
 }
 
 /// GET /entries - 過去の日記一覧
