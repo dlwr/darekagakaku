@@ -55,17 +55,3 @@ pub async fn list_past_entries(db: &D1Database, limit: i32) -> Result<Vec<DiaryE
     result.results::<DiaryEntry>()
 }
 
-/// すべての日記エントリ一覧を取得（新しい順）
-pub async fn list_all_entries(db: &D1Database, limit: i32) -> Result<Vec<DiaryEntry>> {
-    let stmt = db.prepare(
-        "SELECT date, content, created_at, updated_at
-         FROM diary_entries
-         ORDER BY date DESC
-         LIMIT ?1"
-    );
-
-    let stmt = stmt.bind_refs(&D1Type::Integer(limit))?;
-
-    let result = stmt.all().await?;
-    result.results::<DiaryEntry>()
-}

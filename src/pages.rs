@@ -90,7 +90,8 @@ pub async fn entry_page(_req: Request, ctx: RouteContext<()>) -> Result<Response
 pub async fn feed(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;
 
-    let entries = match db::list_all_entries(&db, 20).await {
+    // 今日の日記は編集中なので、過去の確定した日記のみをRSSに含める
+    let entries = match db::list_past_entries(&db, 20).await {
         Ok(entries) => entries,
         Err(e) => {
             worker::console_error!("Failed to list entries for RSS: {:?}", e);
