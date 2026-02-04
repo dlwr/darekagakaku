@@ -49,14 +49,19 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 
 | パス | メソッド | 用途 |
 |------|----------|------|
-| `/` | GET/POST | 今日の日記フォーム |
+| `/` | GET | 今日の日記フォーム |
 | `/a` | GET | Aboutページ |
 | `/feed` | GET | RSSフィード |
 | `/entries` | GET | 過去の日記一覧 |
 | `/entries/:date` | GET | 特定日の日記 |
+| `/admin/versions` | GET | 管理者用：日付選択ページ |
+| `/admin/entries/:date/versions` | GET | 管理者用：バージョン一覧 |
+| `/admin/entries/:date/versions/:version` | GET | 管理者用：バージョン詳細 |
 | `/api/today` | GET/POST | 今日の日記API |
 | `/api/entries` | GET | 一覧API |
 | `/api/entries/:date` | GET | 特定日API |
+| `/api/admin/entries/:date/versions` | GET | 管理者用：バージョン一覧API |
+| `/api/admin/entries/:date/versions/:version` | GET | 管理者用：バージョン詳細API |
 
 ### データベース
 
