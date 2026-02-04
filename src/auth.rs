@@ -28,21 +28,18 @@ pub fn verify_admin_token(req: &Request, env: &Env) -> Result<bool> {
     };
 
     // まずAuthorizationヘッダーをチェック（API用）
-    if let Some(auth_header) = req.headers().get("Authorization")? {
-        if check_bearer_token(Some(&auth_header), &expected_token) {
-            return Ok(true);
-        }
+    let auth_header = req.headers().get("Authorization")?;
+    if check_bearer_token(auth_header.as_deref(), &expected_token) {
+        return Ok(true);
     }
 
     // 次にクエリパラメーターをチェック（HTML画面用）
     let url = req.url()?;
-    let pairs: Vec<_> = url.query_pairs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-    let pairs_ref: Vec<_> = pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    if check_query_token(pairs_ref.into_iter(), &expected_token) {
-        return Ok(true);
-    }
+    let has_valid_token = url
+        .query_pairs()
+        .any(|(k, v)| k == "token" && v == expected_token);
 
-    Ok(false)
+    Ok(has_valid_token)
 }
 
 /// クエリパラメーターからトークンを取得
