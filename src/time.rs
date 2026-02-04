@@ -11,7 +11,10 @@ fn now_utc() -> DateTime<chrono::Utc> {
     let millis = js_now_millis();
     let secs = millis / 1000;
     let nsecs = ((millis % 1000) * 1_000_000) as u32;
-    DateTime::from_timestamp(secs, nsecs).unwrap()
+    // js_sys::Date::now()は1970年以降の正のミリ秒を返すため、
+    // from_timestampが失敗することは通常ありえない。
+    // 万が一失敗した場合はUNIX epochにフォールバック
+    DateTime::from_timestamp(secs, nsecs).unwrap_or_else(|| DateTime::UNIX_EPOCH)
 }
 
 /// 現在の日付をJSTでYYYY-MM-DD形式の文字列として返す

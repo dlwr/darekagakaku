@@ -118,15 +118,70 @@ pub async fn feed(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     Ok(Response::ok(rss)?.with_headers(headers))
 }
 
+/// GET /admin/login - 管理者ログインページ
+pub async fn admin_login_page(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    let html = templates::render_admin_login(None);
+    Response::from_html(html)
+}
+
+/// POST /admin/login - 管理者ログイン処理
+pub async fn admin_login_submit(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let expected_token = match ctx.env.secret("ADMIN_TOKEN") {
+        Ok(secret) => secret.to_string(),
+        Err(_) => {
+            let html = templates::render_admin_login(Some("認証が設定されていません"));
+            return Response::from_html(html).map(|r| r.with_status(500));
+        }
+    };
+
+    // フォームデータを取得
+    let form_data = req.form_data().await?;
+    let submitted_token = form_data
+        .get("token")
+        .and_then(|v| match v {
+            worker::FormEntry::Field(s) => Some(s),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    if submitted_token != expected_token {
+        let html = templates::render_admin_login(Some("トークンが正しくありません"));
+        return Response::from_html(html).map(|r| r.with_status(401));
+    }
+
+    // httpsかどうかをチェック
+    let is_secure = req.url()?.scheme() == "https";
+
+    // 認証成功、Cookieをセット
+    let cookie = auth::create_auth_cookie(&expected_token, is_secure);
+    let headers = Headers::new();
+    headers.set("Set-Cookie", &cookie)?;
+    headers.set("Location", "/admin/versions")?;
+
+    Ok(Response::empty()?.with_status(302).with_headers(headers))
+}
+
+/// GET /admin/logout - 管理者ログアウト
+pub async fn admin_logout(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    let cookie = auth::create_logout_cookie();
+    let headers = Headers::new();
+    headers.set("Set-Cookie", &cookie)?;
+    headers.set("Location", "/")?;
+
+    Ok(Response::empty()?.with_status(302).with_headers(headers))
+}
+
 /// GET /admin/versions - 管理者用：日付選択ページ
 pub async fn admin_versions_index(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // 認証チェック
     if !auth::verify_admin_token(&req, &ctx.env)? {
-        return auth::unauthorized_html_response();
+        // 未認証の場合はログインページにリダイレクト
+        let headers = Headers::new();
+        headers.set("Location", "/admin/login")?;
+        return Ok(Response::empty()?.with_status(302).with_headers(headers));
     }
 
-    let token = auth::get_token_from_query(&req).unwrap_or_default();
-    let html = templates::render_admin_versions_index(&token);
+    let html = templates::render_admin_versions_index();
     Response::from_html(html)
 }
 
@@ -134,11 +189,12 @@ pub async fn admin_versions_index(req: Request, ctx: RouteContext<()>) -> Result
 pub async fn admin_versions_list(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // 認証チェック
     if !auth::verify_admin_token(&req, &ctx.env)? {
-        return auth::unauthorized_html_response();
+        let headers = Headers::new();
+        headers.set("Location", "/admin/login")?;
+        return Ok(Response::empty()?.with_status(302).with_headers(headers));
     }
 
     let db: D1Database = ctx.env.d1("DB")?;
-    let token = auth::get_token_from_query(&req).unwrap_or_default();
 
     let date = match ctx.param("date") {
         Some(d) => d,
@@ -164,7 +220,6 @@ pub async fn admin_versions_list(req: Request, ctx: RouteContext<()>) -> Result<
         date,
         current.as_ref().map(|e| e.content.as_str()),
         &summaries,
-        &token,
     );
     Response::from_html(html)
 }
@@ -173,11 +228,12 @@ pub async fn admin_versions_list(req: Request, ctx: RouteContext<()>) -> Result<
 pub async fn admin_version_detail(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // 認証チェック
     if !auth::verify_admin_token(&req, &ctx.env)? {
-        return auth::unauthorized_html_response();
+        let headers = Headers::new();
+        headers.set("Location", "/admin/login")?;
+        return Ok(Response::empty()?.with_status(302).with_headers(headers));
     }
 
     let db: D1Database = ctx.env.d1("DB")?;
-    let token = auth::get_token_from_query(&req).unwrap_or_default();
 
     let date = match ctx.param("date") {
         Some(d) => d,
@@ -202,7 +258,7 @@ pub async fn admin_version_detail(req: Request, ctx: RouteContext<()>) -> Result
 
     match db::get_version(&db, date, version).await? {
         Some(v) => {
-            let html = templates::render_admin_version_detail(&v, &token);
+            let html = templates::render_admin_version_detail(&v);
             Response::from_html(html)
         }
         None => {

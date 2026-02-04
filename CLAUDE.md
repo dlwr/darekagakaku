@@ -54,6 +54,8 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 | `/feed` | GET | RSSフィード |
 | `/entries` | GET | 過去の日記一覧 |
 | `/entries/:date` | GET | 特定日の日記 |
+| `/admin/login` | GET/POST | 管理者ログイン（Cookie認証） |
+| `/admin/logout` | GET | 管理者ログアウト |
 | `/admin/versions` | GET | 管理者用：日付選択ページ |
 | `/admin/entries/:date/versions` | GET | 管理者用：バージョン一覧 |
 | `/admin/entries/:date/versions/:version` | GET | 管理者用：バージョン詳細 |

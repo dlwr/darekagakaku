@@ -25,6 +25,9 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/api/entries", handlers::get_entries)
         .get_async("/api/entries/:date", handlers::get_entry_by_date)
         // 管理者用HTML画面
+        .get_async("/admin/login", pages::admin_login_page)
+        .post_async("/admin/login", pages::admin_login_submit)
+        .get_async("/admin/logout", pages::admin_logout)
         .get_async("/admin/versions", pages::admin_versions_index)
         .get_async("/admin/entries/:date/versions", pages::admin_versions_list)
         .get_async(

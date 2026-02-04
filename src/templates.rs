@@ -445,24 +445,22 @@ fn calculate_weekday(year: i32, month: u32, day: u32) -> u32 {
     ((h + 7) % 7) as u32
 }
 
-fn admin_nav(token: &str) -> String {
-    format!(
-        r#"<nav>
-        <a href="/admin/versions?token={token}">バージョン履歴</a>
+fn admin_nav() -> String {
+    r#"<nav>
+        <a href="/admin/versions">バージョン履歴</a>
+        <a href="/admin/logout">ログアウト</a>
         <a href="/">トップページ</a>
-    </nav>"#,
-        token = token
-    )
+    </nav>"#
+        .to_string()
 }
 
-pub fn render_admin_versions_index(token: &str) -> String {
+pub fn render_admin_versions_index() -> String {
     let today = today_jst();
     format!(
         r#"{head}
     {nav}
     <h1>バージョン履歴 - 管理者ページ</h1>
     <form method="get" action="/admin/entries/{today}/versions">
-        <input type="hidden" name="token" value="{token}">
         <label for="date">日付を入力:</label>
         <input type="date" id="date" name="date" value="{today}" required
                onchange="this.form.action='/admin/entries/'+this.value+'/versions'">
@@ -470,9 +468,8 @@ pub fn render_admin_versions_index(token: &str) -> String {
     </form>
 {footer}"#,
         head = html_head("バージョン履歴"),
-        nav = admin_nav(token),
+        nav = admin_nav(),
         today = today,
-        token = escape_html(token),
         footer = html_footer()
     )
 }
@@ -481,7 +478,6 @@ pub fn render_admin_versions_list(
     date: &str,
     current_content: Option<&str>,
     versions: &[VersionSummary],
-    token: &str,
 ) -> String {
     let current_html = match current_content {
         Some(content) => format!(
@@ -499,7 +495,7 @@ pub fn render_admin_versions_list(
             .iter()
             .map(|v| {
                 format!(
-                    r#"<li><a href="/admin/entries/{date}/versions/{version}?token={token}">
+                    r#"<li><a href="/admin/entries/{date}/versions/{version}">
                         <div class="entry-date">バージョン {version} ({created_at})</div>
                         <div class="entry-preview">{preview}</div>
                     </a></li>"#,
@@ -507,7 +503,6 @@ pub fn render_admin_versions_list(
                     version = v.version_number,
                     created_at = escape_html(&v.created_at),
                     preview = escape_html(&v.preview),
-                    token = escape_html(token)
                 )
             })
             .collect();
@@ -521,37 +516,57 @@ pub fn render_admin_versions_list(
     {current}
     <h2>過去のバージョン</h2>
     {versions}
-    <p><a href="/admin/versions?token={token}">別の日付を選択</a></p>
+    <p><a href="/admin/versions">別の日付を選択</a></p>
 {footer}"#,
         head = html_head(&format!("{} バージョン履歴", date)),
-        nav = admin_nav(token),
+        nav = admin_nav(),
         date = escape_html(date),
         current = current_html,
         versions = versions_html,
-        token = escape_html(token),
         footer = html_footer()
     )
 }
 
-pub fn render_admin_version_detail(version: &DiaryVersion, token: &str) -> String {
+pub fn render_admin_version_detail(version: &DiaryVersion) -> String {
     format!(
         r#"{head}
     {nav}
     <h1>{date}の日記 - バージョン {version_number}</h1>
     <p class="date">保存日時: {created_at}</p>
     <div class="content">{content}</div>
-    <p><a href="/admin/entries/{date}/versions?token={token}">バージョン一覧に戻る</a></p>
+    <p><a href="/admin/entries/{date}/versions">バージョン一覧に戻る</a></p>
 {footer}"#,
         head = html_head(&format!(
             "{} バージョン{}",
             version.entry_date, version.version_number
         )),
-        nav = admin_nav(token),
+        nav = admin_nav(),
         date = escape_html(&version.entry_date),
         version_number = version.version_number,
         created_at = escape_html(&version.created_at),
         content = escape_html(&version.content),
-        token = escape_html(token),
+        footer = html_footer()
+    )
+}
+
+pub fn render_admin_login(error: Option<&str>) -> String {
+    let error_html = error
+        .map(|e| format!(r#"<p class="error">{}</p>"#, escape_html(e)))
+        .unwrap_or_default();
+
+    format!(
+        r#"{head}
+    <nav><a href="/">トップページ</a></nav>
+    <h1>管理者ログイン</h1>
+    {error}
+    <form method="post" action="/admin/login">
+        <label for="token">管理者トークン:</label>
+        <input type="password" id="token" name="token" required autocomplete="off">
+        <button type="submit">ログイン</button>
+    </form>
+{footer}"#,
+        head = html_head("管理者ログイン"),
+        error = error_html,
         footer = html_footer()
     )
 }
