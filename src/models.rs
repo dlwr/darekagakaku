@@ -35,12 +35,6 @@ pub struct TodayEmptyResponse {
     pub can_edit: bool,
 }
 
-/// 日記作成/更新リクエスト
-#[derive(Debug, Deserialize)]
-pub struct CreateDiaryRequest {
-    pub content: String,
-}
-
 /// エラーレスポンス
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {

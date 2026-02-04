@@ -9,3 +9,11 @@ command = "cargo install -q worker-build && worker-build --release"
 binding = "DB"
 database_name = "darekagakaku-db"
 database_id = "7edb62d9-0193-4178-92d2-49126aa0d252"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "8ffcf81f6c3849b0983b4c0e6d6997d9"
+preview_id = "aa86e2fb98ef40ed932d40af548e484c"
+
+[vars]
+TURNSTILE_SITE_KEY = "0x4AAAAAACXgdlZZzSLz6af1"

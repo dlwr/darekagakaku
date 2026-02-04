@@ -26,7 +26,13 @@ pub async fn home(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
         }
     };
 
-    let html = templates::render_home(entry.as_ref());
+    let turnstile_site_key = ctx
+        .env
+        .var("TURNSTILE_SITE_KEY")
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+
+    let html = templates::render_home(entry.as_ref(), &turnstile_site_key);
     Response::from_html(html)
 }
 

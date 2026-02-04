@@ -1,7 +1,6 @@
 use crate::models::{DiaryEntry, DiaryEntrySummary, DiaryVersion, VersionSummary};
 use crate::time::today_jst;
 
-/// 共通のエスケープ処理（HTML/XML両方で使用）
 fn escape_common(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -9,17 +8,14 @@ fn escape_common(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// XMLをエスケープする
 fn escape_xml(s: &str) -> String {
     escape_common(s).replace('\'', "&apos;")
 }
 
-/// HTMLをエスケープする
 fn escape_html(s: &str) -> String {
     escape_common(s).replace('\'', "&#x27;")
 }
 
-/// 共通のHTMLヘッダー
 fn html_head(title: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
@@ -167,7 +163,6 @@ fn html_head(title: &str) -> String {
     )
 }
 
-/// 共通のナビゲーション
 fn html_nav() -> &'static str {
     r#"<nav>
         <a href="/">今日の日記を書く</a>
@@ -177,15 +172,14 @@ fn html_nav() -> &'static str {
     </nav>"#
 }
 
-/// HTMLフッター
 fn html_footer() -> &'static str {
     "</body></html>"
 }
 
-/// ホームページ（今日の日記フォーム）
-pub fn render_home(entry: Option<&DiaryEntry>) -> String {
+pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> String {
     let today = today_jst();
     let content = entry.map(|e| escape_html(&e.content)).unwrap_or_default();
+    let turnstile_key = escape_html(turnstile_site_key);
 
     format!(
         r#"{head}
@@ -195,20 +189,41 @@ pub fn render_home(entry: Option<&DiaryEntry>) -> String {
     <form id="diary-form">
         <textarea name="content" placeholder="今日の日記を書いてください...">{content}</textarea>
         <br>
+        <div id="turnstile-container"></div>
         <button type="submit">保存する</button>
     </form>
     <p class="hint">0時（JST）になると編集できなくなります</p>
     <script>
+    var turnstileWidgetId = null;
+    function initTurnstile() {{
+        if (typeof turnstile !== 'undefined' && document.getElementById('turnstile-container')) {{
+            turnstileWidgetId = turnstile.render('#turnstile-container', {{
+                sitekey: '{turnstile_key}',
+                callback: function(token) {{}},
+                'error-callback': function() {{
+                    console.error('Turnstile error');
+                }}
+            }});
+        }}
+    }}
     document.getElementById('diary-form').addEventListener('submit', function(e) {{
         e.preventDefault();
         var form = this;
         var btn = form.querySelector('button');
+        var token = turnstileWidgetId ? turnstile.getResponse(turnstileWidgetId) : null;
+        if (!token) {{
+            alert('認証処理中です。少々お待ちください。');
+            return;
+        }}
         btn.disabled = true;
         btn.textContent = '保存中...';
         fetch('/api/today', {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
-            body: JSON.stringify({{ content: form.content.value }})
+            body: JSON.stringify({{
+                content: form.content.value,
+                turnstile_token: token
+            }})
         }}).then(function(res) {{
             if (res.ok) {{
                 var toast = document.createElement('div');
@@ -216,6 +231,9 @@ pub fn render_home(entry: Option<&DiaryEntry>) -> String {
                 toast.textContent = '保存しました';
                 document.body.appendChild(toast);
                 setTimeout(function() {{ toast.remove(); }}, 3000);
+                turnstile.reset(turnstileWidgetId);
+            }} else if (res.status === 429) {{
+                alert('投稿制限中です。しばらくお待ちください。');
             }} else {{
                 alert('保存に失敗しました');
             }}
@@ -227,16 +245,17 @@ pub fn render_home(entry: Option<&DiaryEntry>) -> String {
         }});
     }});
     </script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=initTurnstile" async defer></script>
 {footer}"#,
         head = html_head("今日の日記"),
         nav = html_nav(),
         today = today,
         content = content,
+        turnstile_key = turnstile_key,
         footer = html_footer()
     )
 }
 
-/// 過去の日記一覧ページ
 pub fn render_archive(entries: &[DiaryEntrySummary]) -> String {
     let entries_html = if entries.is_empty() {
         r#"<p class="empty">まだ過去の日記はありません</p>"#.to_string()
@@ -270,7 +289,6 @@ pub fn render_archive(entries: &[DiaryEntrySummary]) -> String {
     )
 }
 
-/// 個別の日記ページ（閲覧専用）
 pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
     let edit_link = if can_edit {
         r#"<p><a href="/">編集する</a></p>"#
@@ -294,7 +312,6 @@ pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
     )
 }
 
-/// 404ページ
 pub fn render_not_found() -> String {
     format!(
         r#"{head}
@@ -308,7 +325,6 @@ pub fn render_not_found() -> String {
     )
 }
 
-/// Aboutページ（これはなにか）
 pub fn render_about() -> String {
     format!(
         r#"{head}
@@ -329,7 +345,6 @@ pub fn render_about() -> String {
     )
 }
 
-/// RSSフィードを生成
 pub fn render_rss(entries: &[DiaryEntry], base_url: &str) -> String {
     let items: Vec<String> = entries
         .iter()
@@ -380,10 +395,7 @@ const MONTH_NAMES: [&str; 12] = [
 
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/// ISO8601形式のタイムスタンプをRFC2822形式に変換
 fn datetime_to_rfc2822(datetime: &str) -> String {
-    // 例: "2025-01-15T10:30:45Z" or "2025-01-15T10:30:45+09:00"
-    // 最低限 "YYYY-MM-DDTHH:MM:SS" の部分をパース
     if datetime.len() < 19 {
         return datetime.to_string();
     }
@@ -421,7 +433,6 @@ fn datetime_to_rfc2822(datetime: &str) -> String {
     )
 }
 
-/// 曜日を計算（0=日曜〜6=土曜）
 fn calculate_weekday(year: i32, month: u32, day: u32) -> u32 {
     let y = if month <= 2 { year - 1 } else { year };
     let m = if month <= 2 { month + 12 } else { month };
@@ -434,7 +445,6 @@ fn calculate_weekday(year: i32, month: u32, day: u32) -> u32 {
     ((h + 7) % 7) as u32
 }
 
-/// 管理者用ナビゲーション
 fn admin_nav(token: &str) -> String {
     format!(
         r#"<nav>
@@ -445,7 +455,6 @@ fn admin_nav(token: &str) -> String {
     )
 }
 
-/// 管理者用：日付選択ページ
 pub fn render_admin_versions_index(token: &str) -> String {
     let today = today_jst();
     format!(
@@ -468,7 +477,6 @@ pub fn render_admin_versions_index(token: &str) -> String {
     )
 }
 
-/// 管理者用：バージョン一覧ページ
 pub fn render_admin_versions_list(
     date: &str,
     current_content: Option<&str>,
@@ -525,7 +533,6 @@ pub fn render_admin_versions_list(
     )
 }
 
-/// 管理者用：バージョン詳細ページ
 pub fn render_admin_version_detail(version: &DiaryVersion, token: &str) -> String {
     format!(
         r#"{head}

@@ -5,8 +5,10 @@ mod db;
 mod handlers;
 mod models;
 mod pages;
+mod rate_limit;
 mod templates;
 mod time;
+mod turnstile;
 
 #[event(fetch, respond_with_errors)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {

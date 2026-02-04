@@ -1,15 +1,24 @@
+use serde::Deserialize;
 use worker::d1::D1Database;
 use worker::{Request, Response, Result, RouteContext};
 
 use crate::auth;
 use crate::db;
 use crate::models::{
-    CreateDiaryRequest, DiaryEntrySummary, DiaryEntryResponse, DiaryListResponse,
+    DiaryEntrySummary, DiaryEntryResponse, DiaryListResponse,
     ErrorResponse, TodayEmptyResponse, VersionDetailResponse, VersionListResponse, VersionSummary,
 };
+use crate::rate_limit;
 use crate::time::{is_today, is_valid_date, today_jst};
+use crate::turnstile;
 
 const MAX_CONTENT_LENGTH: usize = 10000;
+
+#[derive(Deserialize)]
+struct PostTodayRequest {
+    content: String,
+    turnstile_token: Option<String>,
+}
 
 /// GET /api/today - 今日の日記を取得
 pub async fn get_today(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
@@ -39,10 +48,17 @@ pub async fn get_today(_req: Request, ctx: RouteContext<()>) -> Result<Response>
 
 /// POST /api/today - 今日の日記を作成/更新
 pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let kv = ctx.env.kv("RATE_LIMIT")?;
+    let ip = rate_limit::get_client_ip(&req);
+
+    if rate_limit::check_rate_limit(&kv, &ip).await? {
+        return Response::from_json(&ErrorResponse::bad_request("Too Many Requests"))
+            .map(|r| r.with_status(429));
+    }
+
     let db: D1Database = ctx.env.d1("DB")?;
 
-    // リクエストボディをパース
-    let body: CreateDiaryRequest = match req.json().await {
+    let body: PostTodayRequest = match req.json().await {
         Ok(body) => body,
         Err(_) => {
             return Response::from_json(&ErrorResponse::bad_request("Invalid JSON"))
@@ -50,12 +66,33 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
         }
     };
 
-    // CRLF (\r\n) を LF (\n) に正規化
-    // Windows環境のブラウザからの入力にはCRLFが含まれることがあり、
-    // D1/workerクレートで正しく処理されないため、\rを削除する
+    let token = match &body.turnstile_token {
+        Some(t) => t,
+        None => {
+            return Response::from_json(&ErrorResponse::bad_request("Turnstile token required"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    let secret = ctx.env.secret("TURNSTILE_SECRET_KEY")?.to_string();
+    match turnstile::verify_turnstile(&secret, token, Some(&ip)).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Response::from_json(&ErrorResponse::bad_request(
+                "Turnstile verification failed",
+            ))
+            .map(|r| r.with_status(400));
+        }
+        Err(e) => {
+            worker::console_error!("Turnstile verification error: {:?}", e);
+            return Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| r.with_status(500));
+        }
+    }
+
+    // CRLF を LF に正規化（Windows環境対応）
     let content = body.content.replace('\r', "");
 
-    // バリデーション: コンテンツの長さをチェック
     if content.chars().count() > MAX_CONTENT_LENGTH {
         return Response::from_json(&ErrorResponse::bad_request(format!(
             "Content too long. Maximum {} characters allowed.",
@@ -64,9 +101,12 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
         .map(|r| r.with_status(400));
     }
 
-    // 今日の日記を作成/更新
     match db::upsert_today_entry(&db, &content).await {
         Ok(()) => {
+            if let Err(e) = rate_limit::increment_rate_limit(&kv, &ip).await {
+                worker::console_error!("Failed to increment rate limit: {:?}", e);
+            }
+
             let today = today_jst();
             let response = DiaryEntryResponse {
                 date: today,
