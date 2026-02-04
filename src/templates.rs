@@ -1,4 +1,4 @@
-use crate::models::{DiaryEntry, DiaryEntrySummary};
+use crate::models::{DiaryEntry, DiaryEntrySummary, DiaryVersion, VersionSummary};
 use crate::time::today_jst;
 
 /// 共通のエスケープ処理（HTML/XML両方で使用）
@@ -432,6 +432,121 @@ fn calculate_weekday(year: i32, month: u32, day: u32) -> u32 {
 
     let h = (d + (13 * (m as i32 + 1)) / 5 + r + r / 4 + q / 4 - 2 * q) % 7;
     ((h + 7) % 7) as u32
+}
+
+/// 管理者用ナビゲーション
+fn admin_nav(token: &str) -> String {
+    format!(
+        r#"<nav>
+        <a href="/admin/versions?token={token}">バージョン履歴</a>
+        <a href="/">トップページ</a>
+    </nav>"#,
+        token = token
+    )
+}
+
+/// 管理者用：日付選択ページ
+pub fn render_admin_versions_index(token: &str) -> String {
+    let today = today_jst();
+    format!(
+        r#"{head}
+    {nav}
+    <h1>バージョン履歴 - 管理者ページ</h1>
+    <form method="get" action="/admin/entries/{today}/versions">
+        <input type="hidden" name="token" value="{token}">
+        <label for="date">日付を入力:</label>
+        <input type="date" id="date" name="date" value="{today}" required
+               onchange="this.form.action='/admin/entries/'+this.value+'/versions'">
+        <button type="submit">表示</button>
+    </form>
+{footer}"#,
+        head = html_head("バージョン履歴"),
+        nav = admin_nav(token),
+        today = today,
+        token = escape_html(token),
+        footer = html_footer()
+    )
+}
+
+/// 管理者用：バージョン一覧ページ
+pub fn render_admin_versions_list(
+    date: &str,
+    current_content: Option<&str>,
+    versions: &[VersionSummary],
+    token: &str,
+) -> String {
+    let current_html = match current_content {
+        Some(content) => format!(
+            r#"<h2>現在の内容</h2>
+            <div class="content">{}</div>"#,
+            escape_html(content)
+        ),
+        None => r#"<p class="empty">この日付の日記はありません</p>"#.to_string(),
+    };
+
+    let versions_html = if versions.is_empty() {
+        r#"<p class="empty">バージョン履歴はありません</p>"#.to_string()
+    } else {
+        let items: Vec<String> = versions
+            .iter()
+            .map(|v| {
+                format!(
+                    r#"<li><a href="/admin/entries/{date}/versions/{version}?token={token}">
+                        <div class="entry-date">バージョン {version} ({created_at})</div>
+                        <div class="entry-preview">{preview}</div>
+                    </a></li>"#,
+                    date = escape_html(date),
+                    version = v.version_number,
+                    created_at = escape_html(&v.created_at),
+                    preview = escape_html(&v.preview),
+                    token = escape_html(token)
+                )
+            })
+            .collect();
+        format!(r#"<ul class="entry-list">{}</ul>"#, items.join("\n"))
+    };
+
+    format!(
+        r#"{head}
+    {nav}
+    <h1>{date}のバージョン履歴</h1>
+    {current}
+    <h2>過去のバージョン</h2>
+    {versions}
+    <p><a href="/admin/versions?token={token}">別の日付を選択</a></p>
+{footer}"#,
+        head = html_head(&format!("{} バージョン履歴", date)),
+        nav = admin_nav(token),
+        date = escape_html(date),
+        current = current_html,
+        versions = versions_html,
+        token = escape_html(token),
+        footer = html_footer()
+    )
+}
+
+/// 管理者用：バージョン詳細ページ
+pub fn render_admin_version_detail(version: &DiaryVersion, token: &str) -> String {
+    format!(
+        r#"{head}
+    {nav}
+    <h1>{date}の日記 - バージョン {version_number}</h1>
+    <p class="date">保存日時: {created_at}</p>
+    <div class="content">{content}</div>
+    <p><a href="/admin/entries/{date}/versions?token={token}">バージョン一覧に戻る</a></p>
+{footer}"#,
+        head = html_head(&format!(
+            "{} バージョン{}",
+            version.entry_date, version.version_number
+        )),
+        nav = admin_nav(token),
+        date = escape_html(&version.entry_date),
+        version_number = version.version_number,
+        created_at = escape_html(&version.created_at),
+        content = escape_html(&version.content),
+        token = escape_html(token),
+        footer = html_footer()
+    )
 }
 
 #[cfg(test)]

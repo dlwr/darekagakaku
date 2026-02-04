@@ -98,6 +98,57 @@ impl DiaryEntrySummary {
     }
 }
 
+/// バージョン履歴のデータ構造
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiaryVersion {
+    pub id: i64,
+    pub entry_date: String,
+    pub content: String,
+    pub version_number: i32,
+    pub created_at: String,
+}
+
+/// バージョン一覧レスポンス
+#[derive(Debug, Serialize)]
+pub struct VersionListResponse {
+    pub entry_date: String,
+    pub current_content: Option<String>,
+    pub versions: Vec<VersionSummary>,
+}
+
+/// バージョンサマリ（一覧用）
+#[derive(Debug, Serialize)]
+pub struct VersionSummary {
+    pub version_number: i32,
+    pub created_at: String,
+    pub preview: String,
+}
+
+impl VersionSummary {
+    pub fn from_version(version: &DiaryVersion) -> Self {
+        let preview = if version.content.chars().count() > 100 {
+            let preview: String = version.content.chars().take(100).collect();
+            format!("{}...", preview)
+        } else {
+            version.content.clone()
+        };
+        Self {
+            version_number: version.version_number,
+            created_at: version.created_at.clone(),
+            preview,
+        }
+    }
+}
+
+/// 単一バージョンレスポンス
+#[derive(Debug, Serialize)]
+pub struct VersionDetailResponse {
+    pub entry_date: String,
+    pub version_number: i32,
+    pub content: String,
+    pub created_at: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

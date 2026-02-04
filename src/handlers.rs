@@ -1,10 +1,11 @@
 use worker::d1::D1Database;
 use worker::{Request, Response, Result, RouteContext};
 
+use crate::auth;
 use crate::db;
 use crate::models::{
     CreateDiaryRequest, DiaryEntrySummary, DiaryEntryResponse, DiaryListResponse,
-    ErrorResponse, TodayEmptyResponse,
+    ErrorResponse, TodayEmptyResponse, VersionDetailResponse, VersionListResponse, VersionSummary,
 };
 use crate::time::{is_today, is_valid_date, today_jst};
 
@@ -49,8 +50,13 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
         }
     };
 
+    // CRLF (\r\n) を LF (\n) に正規化
+    // Windows環境のブラウザからの入力にはCRLFが含まれることがあり、
+    // D1/workerクレートで正しく処理されないため、\rを削除する
+    let content = body.content.replace('\r', "");
+
     // バリデーション: コンテンツの長さをチェック
-    if body.content.chars().count() > MAX_CONTENT_LENGTH {
+    if content.chars().count() > MAX_CONTENT_LENGTH {
         return Response::from_json(&ErrorResponse::bad_request(format!(
             "Content too long. Maximum {} characters allowed.",
             MAX_CONTENT_LENGTH
@@ -59,12 +65,12 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
     }
 
     // 今日の日記を作成/更新
-    match db::upsert_today_entry(&db, &body.content).await {
+    match db::upsert_today_entry(&db, &content).await {
         Ok(()) => {
             let today = today_jst();
             let response = DiaryEntryResponse {
                 date: today,
-                content: body.content,
+                content,
                 can_edit: true,
             };
             Response::from_json(&response).map(|r| r.with_status(201))
@@ -131,5 +137,90 @@ pub async fn get_entry_by_date(_req: Request, ctx: RouteContext<()>) -> Result<R
             Response::from_json(&ErrorResponse::internal_error())
                 .map(|r| r.with_status(500))
         }
+    }
+}
+
+/// GET /api/admin/entries/:date/versions - バージョン一覧取得（管理者用）
+pub async fn admin_list_versions(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // 認証チェック
+    if !auth::verify_admin_token(&req, &ctx.env)? {
+        return auth::unauthorized_response();
+    }
+
+    let db: D1Database = ctx.env.d1("DB")?;
+
+    let date = match ctx.param("date") {
+        Some(d) => d,
+        None => {
+            return Response::from_json(&ErrorResponse::bad_request("Date parameter required"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    if !is_valid_date(date) {
+        return Response::from_json(&ErrorResponse::bad_request(
+            "Invalid date format. Use YYYY-MM-DD.",
+        ))
+        .map(|r| r.with_status(400));
+    }
+
+    // 現在のエントリを取得
+    let current = db::get_entry(&db, date).await?;
+
+    // バージョン一覧を取得
+    let versions = db::list_versions(&db, date).await?;
+
+    let response = VersionListResponse {
+        entry_date: date.to_string(),
+        current_content: current.map(|e| e.content),
+        versions: versions.iter().map(VersionSummary::from_version).collect(),
+    };
+
+    Response::from_json(&response)
+}
+
+/// GET /api/admin/entries/:date/versions/:version - 特定バージョン取得（管理者用）
+pub async fn admin_get_version(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // 認証チェック
+    if !auth::verify_admin_token(&req, &ctx.env)? {
+        return auth::unauthorized_response();
+    }
+
+    let db: D1Database = ctx.env.d1("DB")?;
+
+    let date = match ctx.param("date") {
+        Some(d) => d,
+        None => {
+            return Response::from_json(&ErrorResponse::bad_request("Date parameter required"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    let version: i32 = match ctx.param("version").and_then(|v| v.parse().ok()) {
+        Some(v) => v,
+        None => {
+            return Response::from_json(&ErrorResponse::bad_request("Invalid version number"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    if !is_valid_date(date) {
+        return Response::from_json(&ErrorResponse::bad_request(
+            "Invalid date format. Use YYYY-MM-DD.",
+        ))
+        .map(|r| r.with_status(400));
+    }
+
+    match db::get_version(&db, date, version).await? {
+        Some(v) => {
+            let response = VersionDetailResponse {
+                entry_date: v.entry_date,
+                version_number: v.version_number,
+                content: v.content,
+                created_at: v.created_at,
+            };
+            Response::from_json(&response)
+        }
+        None => Response::from_json(&ErrorResponse::not_found()).map(|r| r.with_status(404)),
     }
 }

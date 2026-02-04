@@ -1,8 +1,9 @@
 use worker::d1::D1Database;
 use worker::{Headers, Request, Response, Result, RouteContext};
 
+use crate::auth;
 use crate::db;
-use crate::models::DiaryEntrySummary;
+use crate::models::{DiaryEntrySummary, VersionSummary};
 use crate::templates;
 use crate::time::{is_today, is_valid_date, today_jst};
 
@@ -109,4 +110,98 @@ pub async fn feed(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     headers.set("Content-Type", "application/rss+xml; charset=utf-8")?;
 
     Ok(Response::ok(rss)?.with_headers(headers))
+}
+
+/// GET /admin/versions - 管理者用：日付選択ページ
+pub async fn admin_versions_index(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // 認証チェック
+    if !auth::verify_admin_token(&req, &ctx.env)? {
+        return auth::unauthorized_html_response();
+    }
+
+    let token = auth::get_token_from_query(&req).unwrap_or_default();
+    let html = templates::render_admin_versions_index(&token);
+    Response::from_html(html)
+}
+
+/// GET /admin/entries/:date/versions - 管理者用：バージョン一覧ページ
+pub async fn admin_versions_list(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // 認証チェック
+    if !auth::verify_admin_token(&req, &ctx.env)? {
+        return auth::unauthorized_html_response();
+    }
+
+    let db: D1Database = ctx.env.d1("DB")?;
+    let token = auth::get_token_from_query(&req).unwrap_or_default();
+
+    let date = match ctx.param("date") {
+        Some(d) => d,
+        None => {
+            let html = templates::render_not_found();
+            return Response::from_html(html).map(|r| r.with_status(404));
+        }
+    };
+
+    if !is_valid_date(date) {
+        let html = templates::render_not_found();
+        return Response::from_html(html).map(|r| r.with_status(404));
+    }
+
+    // 現在のエントリを取得
+    let current = db::get_entry(&db, date).await?;
+
+    // バージョン一覧を取得
+    let versions = db::list_versions(&db, date).await?;
+    let summaries: Vec<VersionSummary> = versions.iter().map(VersionSummary::from_version).collect();
+
+    let html = templates::render_admin_versions_list(
+        date,
+        current.as_ref().map(|e| e.content.as_str()),
+        &summaries,
+        &token,
+    );
+    Response::from_html(html)
+}
+
+/// GET /admin/entries/:date/versions/:version - 管理者用：バージョン詳細ページ
+pub async fn admin_version_detail(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // 認証チェック
+    if !auth::verify_admin_token(&req, &ctx.env)? {
+        return auth::unauthorized_html_response();
+    }
+
+    let db: D1Database = ctx.env.d1("DB")?;
+    let token = auth::get_token_from_query(&req).unwrap_or_default();
+
+    let date = match ctx.param("date") {
+        Some(d) => d,
+        None => {
+            let html = templates::render_not_found();
+            return Response::from_html(html).map(|r| r.with_status(404));
+        }
+    };
+
+    let version: i32 = match ctx.param("version").and_then(|v| v.parse().ok()) {
+        Some(v) => v,
+        None => {
+            let html = templates::render_not_found();
+            return Response::from_html(html).map(|r| r.with_status(404));
+        }
+    };
+
+    if !is_valid_date(date) {
+        let html = templates::render_not_found();
+        return Response::from_html(html).map(|r| r.with_status(404));
+    }
+
+    match db::get_version(&db, date, version).await? {
+        Some(v) => {
+            let html = templates::render_admin_version_detail(&v, &token);
+            Response::from_html(html)
+        }
+        None => {
+            let html = templates::render_not_found();
+            Response::from_html(html).map(|r| r.with_status(404))
+        }
+    }
 }

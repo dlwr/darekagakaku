@@ -1,5 +1,6 @@
 use worker::*;
 
+mod auth;
 mod db;
 mod handlers;
 mod models;
@@ -21,6 +22,22 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/api/today", handlers::post_today)
         .get_async("/api/entries", handlers::get_entries)
         .get_async("/api/entries/:date", handlers::get_entry_by_date)
+        // 管理者用HTML画面
+        .get_async("/admin/versions", pages::admin_versions_index)
+        .get_async("/admin/entries/:date/versions", pages::admin_versions_list)
+        .get_async(
+            "/admin/entries/:date/versions/:version",
+            pages::admin_version_detail,
+        )
+        // 管理者用API
+        .get_async(
+            "/api/admin/entries/:date/versions",
+            handlers::admin_list_versions,
+        )
+        .get_async(
+            "/api/admin/entries/:date/versions/:version",
+            handlers::admin_get_version,
+        )
         .run(req, env)
         .await
 }
