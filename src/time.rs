@@ -40,3 +40,56 @@ pub fn parse_date(date: &str) -> Option<NaiveDate> {
 pub fn is_valid_date(date: &str) -> bool {
     parse_date(date).is_some()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_date_valid() {
+        let result = parse_date("2025-01-15");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().to_string(), "2025-01-15");
+    }
+
+    #[test]
+    fn test_parse_date_valid_leap_year() {
+        // 閏年の2月29日
+        assert!(parse_date("2024-02-29").is_some());
+    }
+
+    #[test]
+    fn test_parse_date_invalid_format() {
+        assert!(parse_date("2025/01/15").is_none());
+        assert!(parse_date("15-01-2025").is_none());
+        assert!(parse_date("not-a-date").is_none());
+        assert!(parse_date("").is_none());
+    }
+
+    #[test]
+    fn test_parse_date_invalid_values() {
+        // 無効な月
+        assert!(parse_date("2025-13-01").is_none());
+        // 無効な日
+        assert!(parse_date("2025-02-30").is_none());
+        // ゼロの月
+        assert!(parse_date("2025-00-15").is_none());
+        // 閏年じゃない年の2月29日
+        assert!(parse_date("2025-02-29").is_none());
+    }
+
+    #[test]
+    fn test_is_valid_date_valid() {
+        assert!(is_valid_date("2025-01-15"));
+        assert!(is_valid_date("2024-02-29")); // 閏年
+        assert!(is_valid_date("2000-12-31"));
+    }
+
+    #[test]
+    fn test_is_valid_date_invalid() {
+        assert!(!is_valid_date("invalid"));
+        assert!(!is_valid_date("2025-02-29")); // 閏年じゃない
+        assert!(!is_valid_date(""));
+        assert!(!is_valid_date("2025-13-01"));
+    }
+}
