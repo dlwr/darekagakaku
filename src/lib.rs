@@ -12,6 +12,20 @@ mod turnstile;
 
 #[event(fetch, respond_with_errors)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    // カノニカルホストへのリダイレクト
+    if let Ok(canonical) = env.var("CANONICAL_HOST") {
+        let canonical_host = canonical.to_string();
+        let url = req.url()?;
+        if let Some(host) = url.host_str() {
+            if host != canonical_host {
+                let new_url = format!("https://{}{}", canonical_host, url.path());
+                let headers = Headers::new();
+                headers.set("Location", &new_url)?;
+                return Ok(Response::empty()?.with_status(301).with_headers(headers));
+            }
+        }
+    }
+
     Router::new()
         // HTMLページ
         .get_async("/", pages::home)
