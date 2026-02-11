@@ -1,6 +1,7 @@
 name = "darekagakaku"
 main = "build/worker/shim.mjs"
 compatibility_date = "2026-02-02"
+workers_dev = true
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
@@ -17,3 +18,9 @@ preview_id = "aa86e2fb98ef40ed932d40af548e484c"
 
 [vars]
 TURNSTILE_SITE_KEY = "0x4AAAAAACXgdlZZzSLz6af1"
+CANONICAL_HOST = "darekagakaku.day"
+
+# カスタムドメインのルーティング
+[[routes]]
+pattern = "darekagakaku.day"
+custom_domain = true
