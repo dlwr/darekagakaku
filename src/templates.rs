@@ -16,6 +16,46 @@ fn escape_html(s: &str) -> String {
     escape_common(s).replace('\'', "&#x27;")
 }
 
+fn linkify(text: &str) -> String {
+    use std::fmt::Write;
+
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(pos) = rest.find("http") {
+        let candidate = &rest[pos..];
+
+        // "https://" (8 chars) or "http://" (7 chars) のみマッチ
+        let scheme_len = if candidate.starts_with("https://") {
+            8
+        } else if candidate.starts_with("http://") {
+            7
+        } else {
+            result.push_str(&rest[..pos + 4]);
+            rest = &rest[pos + 4..];
+            continue;
+        };
+
+        // 空白・改行・< でURLの終端を判定
+        let url_end = candidate[scheme_len..]
+            .find(|c: char| c.is_whitespace() || c == '<')
+            .map_or(candidate.len(), |i| i + scheme_len);
+
+        let url = &candidate[..url_end];
+
+        result.push_str(&rest[..pos]);
+        let _ = write!(
+            result,
+            r#"<a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>"#
+        );
+
+        rest = &rest[pos + url_end..];
+    }
+
+    result.push_str(rest);
+    result
+}
+
 fn truncate_for_description(content: &str, max_chars: usize) -> String {
     let trimmed = content.trim();
     if trimmed.is_empty() {
@@ -356,7 +396,7 @@ pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
         ),
         nav = html_nav(),
         date = escape_html(&entry.date),
-        content = escape_html(&entry.content),
+        content = linkify(&escape_html(&entry.content)),
         edit_link = edit_link,
         footer = html_footer()
     )
@@ -797,6 +837,59 @@ mod tests {
         assert!(!html.contains("og:image"));
         assert!(!html.contains("twitter:image"));
         assert!(html.contains(r#"<meta name="twitter:card" content="summary">"#));
+    }
+
+    #[test]
+    fn test_linkify_no_url() {
+        assert_eq!(linkify("普通のテキスト"), "普通のテキスト");
+    }
+
+    #[test]
+    fn test_linkify_https_url() {
+        assert_eq!(
+            linkify("見て https://example.com いいね"),
+            r#"見て <a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a> いいね"#
+        );
+    }
+
+    #[test]
+    fn test_linkify_http_url() {
+        assert_eq!(
+            linkify("http://example.com"),
+            r#"<a href="http://example.com" target="_blank" rel="noopener noreferrer">http://example.com</a>"#
+        );
+    }
+
+    #[test]
+    fn test_linkify_multiple_urls() {
+        let result = linkify("https://a.com と https://b.com");
+        assert!(result.contains(r#"<a href="https://a.com""#));
+        assert!(result.contains(r#"<a href="https://b.com""#));
+    }
+
+    #[test]
+    fn test_linkify_preserves_escaped_html() {
+        let result = linkify("text &amp; https://example.com");
+        assert!(result.contains("&amp;"));
+        assert!(result.contains(r#"<a href="https://example.com""#));
+    }
+
+    #[test]
+    fn test_linkify_url_with_path_and_query() {
+        let result = linkify("https://example.com/path?q=1&amp;r=2 end");
+        assert!(result.contains(r#"<a href="https://example.com/path?q=1&amp;r=2""#));
+    }
+
+    #[test]
+    fn test_render_entry_links_urls() {
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "見て https://example.com いいね".to_string(),
+            created_at: "2025-01-15T10:00:00Z".to_string(),
+            updated_at: "2025-01-15T10:00:00Z".to_string(),
+        };
+        let html = render_entry(&entry, false);
+        assert!(html.contains(r#"<a href="https://example.com""#));
     }
 
     #[test]
