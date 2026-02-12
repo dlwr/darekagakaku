@@ -16,14 +16,57 @@ fn escape_html(s: &str) -> String {
     escape_common(s).replace('\'', "&#x27;")
 }
 
-fn html_head(title: &str) -> String {
+fn truncate_for_description(content: &str, max_chars: usize) -> String {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return "この日の日記".to_string();
+    }
+    if trimmed.chars().count() <= max_chars {
+        trimmed.to_string()
+    } else {
+        let truncated: String = trimmed.chars().take(max_chars).collect();
+        format!("{}...", truncated)
+    }
+}
+
+fn html_head(title: &str, description: Option<&str>, path: &str, og_image: Option<&str>) -> String {
+    let default_description = "誰でも書ける共有日記。日付が変わると編集できなくなります。";
+    let desc = escape_html(description.unwrap_or(default_description));
+    let full_title = format!("{} - 誰かが書く日記", escape_html(title));
+    let url = format!("https://darekagakaku.day{}", path);
+
+    let twitter_card = if og_image.is_some() {
+        "summary_large_image"
+    } else {
+        "summary"
+    };
+
+    let og_image_tags = match og_image {
+        Some(img) => format!(
+            r#"    <meta property="og:image" content="{img}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:image" content="{img}">"#
+        ),
+        None => String::new(),
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title} - 誰かが書く日記</title>
+    <meta property="og:title" content="{full_title}">
+    <meta property="og:description" content="{desc}">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{url}">
+    <meta property="og:site_name" content="誰かが書く日記">
+{og_image_tags}
+    <meta name="twitter:card" content="{twitter_card}">
+    <meta name="twitter:title" content="{full_title}">
+    <meta name="twitter:description" content="{desc}">
+    <title>{full_title}</title>
     <link rel="alternate" type="application/rss+xml" title="誰かが書く日記 RSS" href="/feed">
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -159,7 +202,9 @@ fn html_head(title: &str) -> String {
     </style>
 </head>
 <body>"#,
-        title = escape_html(title)
+        full_title = full_title,
+        desc = desc,
+        url = url,
     )
 }
 
@@ -247,7 +292,7 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
     </script>
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=initTurnstile" async defer></script>
 {footer}"#,
-        head = html_head("今日の日記"),
+        head = html_head("今日の日記", None, "/", Some("https://darekagakaku.day/og/default.png")),
         nav = html_nav(),
         today = today,
         content = content,
@@ -282,7 +327,7 @@ pub fn render_archive(entries: &[DiaryEntrySummary]) -> String {
     <h1>過去の日記</h1>
     {entries}
 {footer}"#,
-        head = html_head("過去の日記"),
+        head = html_head("過去の日記", Some("過去の日記一覧"), "/entries", Some("https://darekagakaku.day/og/default.png")),
         nav = html_nav(),
         entries = entries_html,
         footer = html_footer()
@@ -303,7 +348,12 @@ pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
     <div class="content">{content}</div>
     {edit_link}
 {footer}"#,
-        head = html_head(&format!("{}の日記", entry.date)),
+        head = html_head(
+            &format!("{}の日記", entry.date),
+            Some(&truncate_for_description(&entry.content, 150)),
+            &format!("/entries/{}", entry.date),
+            Some(&format!("https://darekagakaku.day/og/{}.png", entry.date)),
+        ),
         nav = html_nav(),
         date = escape_html(&entry.date),
         content = escape_html(&entry.content),
@@ -319,7 +369,7 @@ pub fn render_not_found() -> String {
     <h1>日記が見つかりません</h1>
     <p class="empty">この日の日記は存在しません。</p>
 {footer}"#,
-        head = html_head("見つかりません"),
+        head = html_head("見つかりません", None, "/", Some("https://darekagakaku.day/og/default.png")),
         nav = html_nav(),
         footer = html_footer()
     )
@@ -339,7 +389,12 @@ pub fn render_about() -> String {
     </div>
     <p style="text-align: right; margin-top: 20px;"><a href="/">トップ</a></p>
 {footer}"#,
-        head = html_head("これはなにか"),
+        head = html_head(
+            "これはなにか",
+            Some("「自分が書かなければおそらく誰かが書く日記」についての説明"),
+            "/a",
+            Some("https://darekagakaku.day/og/default.png"),
+        ),
         nav = html_nav(),
         footer = html_footer()
     )
@@ -467,7 +522,7 @@ pub fn render_admin_versions_index() -> String {
         <button type="submit">表示</button>
     </form>
 {footer}"#,
-        head = html_head("バージョン履歴"),
+        head = html_head("バージョン履歴", None, "/admin/versions", None),
         nav = admin_nav(),
         today = today,
         footer = html_footer()
@@ -518,7 +573,12 @@ pub fn render_admin_versions_list(
     {versions}
     <p><a href="/admin/versions">別の日付を選択</a></p>
 {footer}"#,
-        head = html_head(&format!("{} バージョン履歴", date)),
+        head = html_head(
+            &format!("{} バージョン履歴", date),
+            None,
+            &format!("/admin/entries/{}/versions", date),
+            None,
+        ),
         nav = admin_nav(),
         date = escape_html(date),
         current = current_html,
@@ -536,10 +596,12 @@ pub fn render_admin_version_detail(version: &DiaryVersion) -> String {
     <div class="content">{content}</div>
     <p><a href="/admin/entries/{date}/versions">バージョン一覧に戻る</a></p>
 {footer}"#,
-        head = html_head(&format!(
-            "{} バージョン{}",
-            version.entry_date, version.version_number
-        )),
+        head = html_head(
+            &format!("{} バージョン{}", version.entry_date, version.version_number),
+            None,
+            &format!("/admin/entries/{}/versions/{}", version.entry_date, version.version_number),
+            None,
+        ),
         nav = admin_nav(),
         date = escape_html(&version.entry_date),
         version_number = version.version_number,
@@ -565,7 +627,7 @@ pub fn render_admin_login(error: Option<&str>) -> String {
         <button type="submit">ログイン</button>
     </form>
 {footer}"#,
-        head = html_head("管理者ログイン"),
+        head = html_head("管理者ログイン", None, "/admin/login", None),
         error = error_html,
         footer = html_footer()
     )
@@ -654,9 +716,99 @@ mod tests {
 
     #[test]
     fn test_toast_css_exists() {
-        let head = html_head("テスト");
+        let head = html_head("テスト", None, "/", None);
         assert!(head.contains(".toast {"));
         assert!(head.contains("toast-slide-in"));
         assert!(head.contains("toast-fade-out"));
+    }
+
+    #[test]
+    fn test_truncate_for_description_short() {
+        let result = truncate_for_description("短い日記", 150);
+        assert_eq!(result, "短い日記");
+    }
+
+    #[test]
+    fn test_truncate_for_description_long() {
+        let long_content = "あ".repeat(200);
+        let result = truncate_for_description(&long_content, 150);
+        assert_eq!(result.chars().count(), 153); // 150 + "..."
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn test_truncate_for_description_empty() {
+        let result = truncate_for_description("", 150);
+        assert_eq!(result, "この日の日記");
+    }
+
+    #[test]
+    fn test_truncate_for_description_whitespace_only() {
+        let result = truncate_for_description("  \n\t  ", 150);
+        assert_eq!(result, "この日の日記");
+    }
+
+    #[test]
+    fn test_html_head_contains_ogp_tags() {
+        let html = html_head("テスト", Some("説明文"), "/test", None);
+        assert!(html.contains(r#"<meta property="og:title" content="テスト - 誰かが書く日記">"#));
+        assert!(html.contains(r#"<meta property="og:description" content="説明文">"#));
+        assert!(html.contains(r#"<meta property="og:type" content="website">"#));
+        assert!(html.contains(r#"<meta property="og:url" content="https://darekagakaku.day/test">"#));
+        assert!(html.contains(r#"<meta property="og:site_name" content="誰かが書く日記">"#));
+        assert!(html.contains(r#"<meta name="twitter:card" content="summary">"#));
+    }
+
+    #[test]
+    fn test_html_head_default_description() {
+        let html = html_head("テスト", None, "/", None);
+        assert!(html.contains("誰でも書ける共有日記"));
+    }
+
+    #[test]
+    fn test_html_head_escapes_description() {
+        let html = html_head("テスト", Some("<script>alert('xss')</script>"), "/", None);
+        assert!(html.contains("&lt;script&gt;"));
+        assert!(!html.contains(r#"content="<script>"#));
+    }
+
+    #[test]
+    fn test_html_head_with_og_image() {
+        let html = html_head(
+            "テスト",
+            None,
+            "/test",
+            Some("https://darekagakaku.day/og/default.png"),
+        );
+        assert!(html.contains(
+            r#"<meta property="og:image" content="https://darekagakaku.day/og/default.png">"#
+        ));
+        assert!(html.contains(r#"<meta property="og:image:width" content="1200">"#));
+        assert!(html.contains(r#"<meta property="og:image:height" content="630">"#));
+        assert!(html.contains(
+            r#"<meta name="twitter:image" content="https://darekagakaku.day/og/default.png">"#
+        ));
+        assert!(html.contains(r#"<meta name="twitter:card" content="summary_large_image">"#));
+    }
+
+    #[test]
+    fn test_html_head_without_og_image() {
+        let html = html_head("テスト", None, "/test", None);
+        assert!(!html.contains("og:image"));
+        assert!(!html.contains("twitter:image"));
+        assert!(html.contains(r#"<meta name="twitter:card" content="summary">"#));
+    }
+
+    #[test]
+    fn test_render_entry_has_ogp_description() {
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "これは日記の内容です。".to_string(),
+            created_at: "2025-01-15T10:00:00Z".to_string(),
+            updated_at: "2025-01-15T10:00:00Z".to_string(),
+        };
+        let html = render_entry(&entry, false);
+        assert!(html.contains(r#"og:description" content="これは日記の内容です。"#));
+        assert!(html.contains(r#"og:url" content="https://darekagakaku.day/entries/2025-01-15"#));
     }
 }
