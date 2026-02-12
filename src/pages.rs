@@ -7,6 +7,42 @@ use crate::models::{DiaryEntrySummary, VersionSummary};
 use crate::templates;
 use crate::time::{is_today, is_valid_date, today_jst};
 
+/// GET /og/:filename - OG画像をService Binding経由で転送
+///
+/// 日付指定の場合はD1からエントリ内容を取得し、クエリパラメータでOG Workerに渡す。
+/// OG WorkerがメインWorkerのAPIを呼び戻す循環を避けるため。
+pub async fn og_image(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let fetcher = ctx.env.service("OG_IMAGE")?;
+
+    let filename = match ctx.param("filename") {
+        Some(f) => f.as_str(),
+        None => return fetcher.fetch_request(req).await,
+    };
+    let date = filename.strip_suffix(".png").unwrap_or(filename);
+
+    // default.pngやdate形式でない場合はそのまま転送
+    if !is_valid_date(date) {
+        return fetcher.fetch_request(req).await;
+    }
+
+    // D1からエントリ内容を取得してクエリパラメータに付与
+    let db: D1Database = ctx.env.d1("DB")?;
+    let content = match db::get_entry(&db, date).await {
+        Ok(Some(entry)) if entry.content.chars().count() > 60 => {
+            let truncated: String = entry.content.chars().take(60).collect();
+            format!("{truncated}...")
+        }
+        Ok(Some(entry)) => entry.content,
+        _ => String::new(),
+    };
+
+    let mut url = req.url()?;
+    url.query_pairs_mut().append_pair("content", &content);
+
+    let new_req = Request::new(url.as_str(), worker::Method::Get)?;
+    fetcher.fetch_request(new_req).await
+}
+
 /// GET /a - Aboutページ（これはなにか）
 pub async fn about(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
     let html = templates::render_about();

@@ -33,6 +33,8 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/feed", pages::feed)
         .get_async("/entries", pages::entries_list)
         .get_async("/entries/:date", pages::entry_page)
+        // OG画像
+        .get_async("/og/:filename", pages::og_image)
         // JSON API
         .get_async("/api/today", handlers::get_today)
         .post_async("/api/today", handlers::post_today)

@@ -20,6 +20,11 @@ preview_id = "aa86e2fb98ef40ed932d40af548e484c"
 TURNSTILE_SITE_KEY = "0x4AAAAAACXgdlZZzSLz6af1"
 CANONICAL_HOST = "darekagakaku.day"
 
+# OG画像生成ワーカーへのService Binding
+[[services]]
+binding = "OG_IMAGE"
+service = "darekagakaku-og"
+
 # カスタムドメインのルーティング
 [[routes]]
 pattern = "darekagakaku.day"
