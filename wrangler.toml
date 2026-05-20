@@ -4,7 +4,7 @@ compatibility_date = "2026-02-02"
 workers_dev = true
 
 [build]
-command = "cargo install -q worker-build && worker-build --release"
+command = "cargo install -q --version ^0.7 worker-build && worker-build --release"
 
 [[d1_databases]]
 binding = "DB"
@@ -15,6 +15,12 @@ database_id = "7edb62d9-0193-4178-92d2-49126aa0d252"
 binding = "RATE_LIMIT"
 id = "8ffcf81f6c3849b0983b4c0e6d6997d9"
 preview_id = "aa86e2fb98ef40ed932d40af548e484c"
+
+# 日記の画像アップロード用R2バケット
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "darekagakaku-images"
+preview_bucket_name = "darekagakaku-images-preview"
 
 [vars]
 TURNSTILE_SITE_KEY = "0x4AAAAAACXgdlZZzSLz6af1"
