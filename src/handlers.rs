@@ -1,9 +1,10 @@
 use serde::Deserialize;
 use worker::d1::D1Database;
-use worker::{Request, Response, Result, RouteContext};
+use worker::{Headers, Request, Response, Result, RouteContext};
 
 use crate::auth;
 use crate::db;
+use crate::image::{detect_image_mime, MAX_IMAGE_SIZE};
 use crate::models::{
     DiaryEntrySummary, DiaryEntryResponse, DiaryListResponse,
     ErrorResponse, TodayEmptyResponse, VersionDetailResponse, VersionListResponse, VersionSummary,
@@ -93,6 +94,11 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
     // CRLF を LF に正規化（Windows環境対応）
     let content = body.content.replace('\r', "");
 
+    if content.trim().is_empty() {
+        return Response::from_json(&ErrorResponse::bad_request("Content must not be empty"))
+            .map(|r| r.with_status(400));
+    }
+
     if content.chars().count() > MAX_CONTENT_LENGTH {
         return Response::from_json(&ErrorResponse::bad_request(format!(
             "Content too long. Maximum {} characters allowed.",
@@ -121,6 +127,239 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
                 .map(|r| r.with_status(500))
         }
     }
+}
+
+/// POST /api/today/image - 今日の画像をアップロード（multipart/form-data）
+///
+/// フィールド: `image`（File）, `turnstile_token`（Field）
+pub async fn post_today_image(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let kv = ctx.env.kv("RATE_LIMIT")?;
+    let ip = rate_limit::get_client_ip(&req);
+
+    if rate_limit::check_rate_limit(&kv, &ip).await? {
+        return Response::from_json(&ErrorResponse::bad_request("Too Many Requests"))
+            .map(|r| r.with_status(429));
+    }
+
+    let form = match req.form_data().await {
+        Ok(f) => f,
+        Err(_) => {
+            return Response::from_json(&ErrorResponse::bad_request("Invalid form data"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    let token = form
+        .get("turnstile_token")
+        .and_then(|v| match v {
+            worker::FormEntry::Field(s) => Some(s),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    if token.is_empty() {
+        return Response::from_json(&ErrorResponse::bad_request("Turnstile token required"))
+            .map(|r| r.with_status(400));
+    }
+
+    let secret = ctx.env.secret("TURNSTILE_SECRET_KEY")?.to_string();
+    match turnstile::verify_turnstile(&secret, &token, Some(&ip)).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Response::from_json(&ErrorResponse::bad_request(
+                "Turnstile verification failed",
+            ))
+            .map(|r| r.with_status(400));
+        }
+        Err(e) => {
+            worker::console_error!("Turnstile verification error: {:?}", e);
+            return Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| r.with_status(500));
+        }
+    }
+
+    let file = match form.get("image") {
+        Some(worker::FormEntry::File(f)) => f,
+        _ => {
+            return Response::from_json(&ErrorResponse::bad_request("Image file required"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    if file.size() > MAX_IMAGE_SIZE {
+        return Response::from_json(&ErrorResponse::bad_request(format!(
+            "Image too large. Maximum {}MB.",
+            MAX_IMAGE_SIZE / (1024 * 1024)
+        )))
+        .map(|r| r.with_status(413));
+    }
+
+    let bytes = file.bytes().await?;
+    let mime = match detect_image_mime(&bytes) {
+        Some(m) => m,
+        None => {
+            return Response::from_json(&ErrorResponse::bad_request(
+                "Unsupported image format. Use JPEG, PNG, or WebP.",
+            ))
+            .map(|r| r.with_status(400));
+        }
+    };
+
+    let bucket = ctx.env.bucket("IMAGES")?;
+    let today = today_jst();
+    let key = format!("entries/{}", today);
+
+    let metadata = worker::HttpMetadata {
+        content_type: Some(mime.to_string()),
+        ..Default::default()
+    };
+
+    if let Err(e) = bucket
+        .put(&key, bytes)
+        .http_metadata(metadata)
+        .execute()
+        .await
+    {
+        worker::console_error!("Failed to upload image to R2: {:?}", e);
+        return Response::from_json(&ErrorResponse::internal_error())
+            .map(|r| r.with_status(500));
+    }
+
+    let db: D1Database = ctx.env.d1("DB")?;
+    if let Err(e) = db::set_image_mime(&db, &today, mime).await {
+        worker::console_error!("Failed to set image_mime: {:?}", e);
+        return Response::from_json(&ErrorResponse::internal_error())
+            .map(|r| r.with_status(500));
+    }
+
+    if let Err(e) = rate_limit::increment_rate_limit(&kv, &ip).await {
+        worker::console_error!("Failed to increment rate limit: {:?}", e);
+    }
+
+    #[derive(serde::Serialize)]
+    struct UploadResponse {
+        date: String,
+        image_mime: String,
+        image_url: String,
+    }
+
+    let response = UploadResponse {
+        date: today.clone(),
+        image_mime: mime.to_string(),
+        image_url: format!("/images/{}", today),
+    };
+    Response::from_json(&response).map(|r| r.with_status(201))
+}
+
+/// DELETE /api/today/image - 今日の画像を削除
+///
+/// Turnstileトークンを JSON body で受け取る。レートリミットも適用。
+pub async fn delete_today_image(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let kv = ctx.env.kv("RATE_LIMIT")?;
+    let ip = rate_limit::get_client_ip(&req);
+
+    if rate_limit::check_rate_limit(&kv, &ip).await? {
+        return Response::from_json(&ErrorResponse::bad_request("Too Many Requests"))
+            .map(|r| r.with_status(429));
+    }
+
+    #[derive(Deserialize)]
+    struct DeleteBody {
+        turnstile_token: Option<String>,
+    }
+
+    let body: DeleteBody = match req.json().await {
+        Ok(b) => b,
+        Err(_) => {
+            return Response::from_json(&ErrorResponse::bad_request("Invalid JSON"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    let token = match body.turnstile_token {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            return Response::from_json(&ErrorResponse::bad_request("Turnstile token required"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    let secret = ctx.env.secret("TURNSTILE_SECRET_KEY")?.to_string();
+    match turnstile::verify_turnstile(&secret, &token, Some(&ip)).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Response::from_json(&ErrorResponse::bad_request(
+                "Turnstile verification failed",
+            ))
+            .map(|r| r.with_status(400));
+        }
+        Err(e) => {
+            worker::console_error!("Turnstile verification error: {:?}", e);
+            return Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| r.with_status(500));
+        }
+    }
+
+    let today = today_jst();
+    let key = format!("entries/{}", today);
+
+    let bucket = ctx.env.bucket("IMAGES")?;
+    if let Err(e) = bucket.delete(&key).await {
+        worker::console_error!("Failed to delete image from R2: {:?}", e);
+        return Response::from_json(&ErrorResponse::internal_error())
+            .map(|r| r.with_status(500));
+    }
+
+    let db: D1Database = ctx.env.d1("DB")?;
+    if let Err(e) = db::clear_image_mime(&db, &today).await {
+        worker::console_error!("Failed to clear image_mime: {:?}", e);
+        return Response::from_json(&ErrorResponse::internal_error())
+            .map(|r| r.with_status(500));
+    }
+
+    if let Err(e) = rate_limit::increment_rate_limit(&kv, &ip).await {
+        worker::console_error!("Failed to increment rate limit: {:?}", e);
+    }
+
+    Response::empty().map(|r| r.with_status(204))
+}
+
+/// GET /images/:date - 画像配信
+pub async fn get_image(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let date = match ctx.param("date") {
+        Some(d) => d.as_str(),
+        None => return Response::error("Not Found", 404),
+    };
+
+    if !is_valid_date(date) {
+        return Response::error("Not Found", 404);
+    }
+
+    let db: D1Database = ctx.env.d1("DB")?;
+    let mime = match db::get_entry(&db, date).await? {
+        Some(entry) => match entry.image_mime {
+            Some(m) => m,
+            None => return Response::error("Not Found", 404),
+        },
+        None => return Response::error("Not Found", 404),
+    };
+
+    let bucket = ctx.env.bucket("IMAGES")?;
+    let object = match bucket.get(format!("entries/{}", date)).execute().await? {
+        Some(o) => o,
+        None => return Response::error("Not Found", 404),
+    };
+
+    let body = match object.body() {
+        Some(b) => b.response_body()?,
+        None => return Response::error("Not Found", 404),
+    };
+
+    let headers = Headers::new();
+    headers.set("Content-Type", &mime)?;
+    headers.set("Cache-Control", "public, max-age=3600")?;
+
+    Ok(Response::from_body(body)?.with_headers(headers))
 }
 
 /// GET /api/entries - 過去の日記一覧を取得

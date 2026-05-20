@@ -6,9 +6,39 @@ use crate::time::{now_iso8601, today_jst};
 
 /// 指定日の日記エントリを取得
 pub async fn get_entry(db: &D1Database, date: &str) -> Result<Option<DiaryEntry>> {
-    let stmt = db.prepare("SELECT date, content, created_at, updated_at FROM diary_entries WHERE date = ?1");
+    let stmt = db.prepare("SELECT date, content, created_at, updated_at, image_mime FROM diary_entries WHERE date = ?1");
     let stmt = stmt.bind_refs(&D1Type::Text(date))?;
     stmt.first::<DiaryEntry>(None).await
+}
+
+/// 今日の日記の画像MIMEを更新（エントリが無ければ空コンテンツで作成）
+pub async fn set_image_mime(db: &D1Database, date: &str, mime: &str) -> Result<()> {
+    let now = now_iso8601();
+    let stmt = db.prepare(
+        "INSERT INTO diary_entries (date, content, created_at, updated_at, image_mime)
+         VALUES (?1, '', ?2, ?2, ?3)
+         ON CONFLICT(date) DO UPDATE SET
+           image_mime = excluded.image_mime,
+           updated_at = excluded.updated_at",
+    );
+    let stmt = stmt.bind_refs(&[
+        D1Type::Text(date),
+        D1Type::Text(&now),
+        D1Type::Text(mime),
+    ])?;
+    stmt.run().await?;
+    Ok(())
+}
+
+/// 今日の日記の画像MIMEをクリア
+pub async fn clear_image_mime(db: &D1Database, date: &str) -> Result<()> {
+    let now = now_iso8601();
+    let stmt = db.prepare(
+        "UPDATE diary_entries SET image_mime = NULL, updated_at = ?2 WHERE date = ?1",
+    );
+    let stmt = stmt.bind_refs(&[D1Type::Text(date), D1Type::Text(&now)])?;
+    stmt.run().await?;
+    Ok(())
 }
 
 /// 今日の日記エントリを作成または更新（変更がある場合はバージョンを保存）
@@ -116,7 +146,7 @@ pub async fn list_past_entries(db: &D1Database, limit: i32) -> Result<Vec<DiaryE
     let today = today_jst();
 
     let stmt = db.prepare(
-        "SELECT date, content, created_at, updated_at
+        "SELECT date, content, created_at, updated_at, image_mime
          FROM diary_entries
          WHERE date < ?1
          ORDER BY date DESC

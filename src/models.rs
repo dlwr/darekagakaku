@@ -7,6 +7,8 @@ pub struct DiaryEntry {
     pub content: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub image_mime: Option<String>,
 }
 
 /// APIレスポンス用の日記エントリ
@@ -154,6 +156,7 @@ mod tests {
             content: "短い日記".to_string(),
             created_at: "2025-01-15T00:00:00Z".to_string(),
             updated_at: "2025-01-15T00:00:00Z".to_string(),
+            image_mime: None,
         };
         let summary = DiaryEntrySummary::from_entry(&entry);
         assert_eq!(summary.preview, "短い日記");
@@ -167,6 +170,7 @@ mod tests {
             content: long_content,
             created_at: "2025-01-15T00:00:00Z".to_string(),
             updated_at: "2025-01-15T00:00:00Z".to_string(),
+            image_mime: None,
         };
         let summary = DiaryEntrySummary::from_entry(&entry);
         assert!(summary.preview.ends_with("..."));

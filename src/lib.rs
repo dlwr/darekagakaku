@@ -3,6 +3,7 @@ use worker::*;
 mod auth;
 mod db;
 mod handlers;
+mod image;
 mod models;
 mod pages;
 mod rate_limit;
@@ -35,9 +36,13 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/entries/:date", pages::entry_page)
         // OG画像
         .get_async("/og/:filename", pages::og_image)
+        // 画像配信
+        .get_async("/images/:date", handlers::get_image)
         // JSON API
         .get_async("/api/today", handlers::get_today)
         .post_async("/api/today", handlers::post_today)
+        .post_async("/api/today/image", handlers::post_today_image)
+        .delete_async("/api/today/image", handlers::delete_today_image)
         .get_async("/api/entries", handlers::get_entries)
         .get_async("/api/entries/:date", handlers::get_entry_by_date)
         // 管理者用HTML画面
