@@ -342,7 +342,7 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
             String::new(),
             String::new(),
             r#"<div id="image-section">
-        <label for="image-input" class="file-button">画像を追加（任意・1枚・3MBまで）</label>
+        <label for="image-input" class="file-button">画像を追加（任意・1枚／自動で圧縮されます）</label>
         <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden>
     </div>"#
                 .to_string(),
@@ -422,35 +422,60 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
         }});
     }});
 
+    // 長辺2048pxに縮小し、WebP(品質0.85)で再エンコードする。
+    // 透過を保持するためWebPを使用。失敗時は元ファイルをそのまま返す。
+    function compressImage(file) {{
+        return new Promise(function(resolve) {{
+            var url = URL.createObjectURL(file);
+            var img = new Image();
+            img.onload = function() {{
+                URL.revokeObjectURL(url);
+                var maxSide = 2048;
+                var w = img.naturalWidth, h = img.naturalHeight;
+                var scale = Math.min(1, maxSide / Math.max(w, h));
+                var canvas = document.createElement('canvas');
+                canvas.width = Math.round(w * scale);
+                canvas.height = Math.round(h * scale);
+                canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(function(blob) {{
+                    resolve(blob || file);
+                }}, 'image/webp', 0.85);
+            }};
+            img.onerror = function() {{ URL.revokeObjectURL(url); resolve(file); }};
+            img.src = url;
+        }});
+    }}
+
     function uploadImage(file) {{
         if (!file) return;
-        if (file.size > 3 * 1024 * 1024) {{
-            alert('画像サイズは3MBまでです');
-            return;
-        }}
         var token = getTurnstileToken();
         if (!token) {{
             alert('認証処理中です。少々お待ちください。');
             return;
         }}
-        var fd = new FormData();
-        fd.append('image', file);
-        fd.append('turnstile_token', token);
-        fetch('/api/today/image', {{ method: 'POST', body: fd }})
-            .then(function(res) {{
-                if (res.ok) {{
-                    showToast('画像をアップロードしました');
-                    turnstile.reset(turnstileWidgetId);
-                    setTimeout(function() {{ location.reload(); }}, 800);
-                }} else if (res.status === 413) {{
-                    alert('画像サイズが大きすぎます（3MBまで）');
-                }} else if (res.status === 400) {{
-                    alert('画像形式が不正です（JPEG/PNG/WebPのみ）');
-                }} else {{
-                    alert('アップロードに失敗しました');
-                }}
-            }})
-            .catch(function() {{ alert('アップロードに失敗しました'); }});
+        compressImage(file).then(function(blob) {{
+            if (blob.size > 3 * 1024 * 1024) {{
+                alert('画像サイズが大きすぎます（圧縮後も3MBを超えています）');
+                return;
+            }}
+            var fd = new FormData();
+            fd.append('image', blob, 'image.webp');
+            fd.append('turnstile_token', token);
+            return fetch('/api/today/image', {{ method: 'POST', body: fd }})
+                .then(function(res) {{
+                    if (res.ok) {{
+                        showToast('画像をアップロードしました');
+                        turnstile.reset(turnstileWidgetId);
+                        setTimeout(function() {{ location.reload(); }}, 800);
+                    }} else if (res.status === 413) {{
+                        alert('画像サイズが大きすぎます（3MBまで）');
+                    }} else if (res.status === 400) {{
+                        alert('画像形式が不正です（JPEG/PNG/WebPのみ）');
+                    }} else {{
+                        alert('アップロードに失敗しました');
+                    }}
+                }});
+        }}).catch(function() {{ alert('アップロードに失敗しました'); }});
     }}
 
     var imageInput = document.getElementById('image-input');
