@@ -82,12 +82,23 @@ fn html_head(title: &str, description: Option<&str>, path: &str, og_image: Optio
     };
 
     let og_image_tags = match og_image {
-        Some(img) => format!(
-            r#"    <meta property="og:image" content="{img}">
+        Some(img) => {
+            // アップロード画像(/images/...)はWebPでサイズ可変。型のみ宣言し寸法はクローラーに委ねる。
+            // 生成OGカード(/og/*.png)は1200x630 PNG固定。
+            let type_and_dims = if img.contains("/images/") {
+                r#"    <meta property="og:image:type" content="image/webp">"#.to_string()
+            } else {
+                r#"    <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
+    <meta property="og:image:height" content="630">"#
+                    .to_string()
+            };
+            format!(
+                r#"    <meta property="og:image" content="{img}">
+{type_and_dims}
     <meta name="twitter:image" content="{img}">"#
-        ),
+            )
+        }
         None => String::new(),
     };
 
@@ -259,25 +270,25 @@ fn html_head(title: &str, description: Option<&str>, path: &str, og_image: Optio
         .textarea-wrap.has-image textarea::placeholder {{
             color: #555;
         }}
-        .image-controls {{
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            display: flex;
-            gap: 6px;
-        }}
-        .image-controls button {{
-            margin-top: 0;
-            padding: 6px 12px;
-            font-size: 13px;
-            background-color: rgba(0, 0, 0, 0.55);
-            backdrop-filter: blur(2px);
-        }}
-        .image-controls button:hover {{
-            background-color: rgba(0, 0, 0, 0.7);
-        }}
         #image-section {{
             margin: 12px 0;
+            display: flex;
+            gap: 8px;
+        }}
+        #image-section button {{
+            margin-top: 0;
+            padding: 8px 14px;
+            font-size: 13px;
+            background-color: #7f8c8d;
+        }}
+        #image-section button:hover {{
+            background-color: #6c7a7b;
+        }}
+        #image-section #delete-image-btn {{
+            background-color: #c0392b;
+        }}
+        #image-section #delete-image-btn:hover {{
+            background-color: #a93226;
         }}
         .file-button {{
             display: inline-block;
@@ -321,28 +332,26 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
     let has_image = entry.and_then(|e| e.image_mime.as_ref()).is_some();
     let today_esc = escape_html(&today);
 
-    let (wrap_class, textarea_style, overlay_controls, image_section) = if has_image {
+    let (wrap_class, textarea_style, image_section) = if has_image {
         (
             " has-image",
             format!(
                 "background-image: linear-gradient(rgba(255,255,255,0.7), rgba(255,255,255,0.7)), url('/images/{today}');",
                 today = today_esc
             ),
-            r#"<div class="image-controls">
-            <button type="button" id="replace-image-btn">差し替え</button>
-            <button type="button" id="delete-image-btn">削除</button>
-        </div>
-        <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden>"#
+            r#"<div id="image-section">
+        <button type="button" id="replace-image-btn">画像を差し替え</button>
+        <button type="button" id="delete-image-btn">画像を削除</button>
+        <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden>
+    </div>"#
                 .to_string(),
-            String::new(),
         )
     } else {
         (
             "",
             String::new(),
-            String::new(),
             r#"<div id="image-section">
-        <label for="image-input" class="file-button">画像を追加（任意・1枚／自動で圧縮されます）</label>
+        <label for="image-input" class="file-button">画像を追加（任意・1枚）</label>
         <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden>
     </div>"#
                 .to_string(),
@@ -357,7 +366,6 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
     <form id="diary-form">
         <div class="textarea-wrap{wrap_class}">
             <textarea name="content" placeholder="今日の日記を書いてください..." style="{textarea_style}">{content}</textarea>
-            {overlay_controls}
         </div>
         {image_section}
         <div id="turnstile-container"></div>
@@ -529,7 +537,6 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
         content = content,
         wrap_class = wrap_class,
         textarea_style = textarea_style,
-        overlay_controls = overlay_controls,
         image_section = image_section,
         turnstile_key = turnstile_key,
         footer = html_footer()
@@ -585,6 +592,13 @@ pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
         String::new()
     };
 
+    // 画像がある日記はアップロード画像をOGPに、なければ生成OGカードを使う
+    let og_image = if entry.image_mime.is_some() {
+        format!("https://darekagakaku.day/images/{}", entry.date)
+    } else {
+        format!("https://darekagakaku.day/og/{}.png", entry.date)
+    };
+
     format!(
         r#"{head}
     {nav}
@@ -597,7 +611,7 @@ pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
             &format!("{}の日記", entry.date),
             Some(&truncate_for_description(&entry.content, 150)),
             &format!("/entries/{}", entry.date),
-            Some(&format!("https://darekagakaku.day/og/{}.png", entry.date)),
+            Some(&og_image),
         ),
         nav = html_nav(),
         date = escape_html(&entry.date),
@@ -1114,5 +1128,61 @@ mod tests {
         let html = render_entry(&entry, false);
         assert!(html.contains(r#"og:description" content="これは日記の内容です。"#));
         assert!(html.contains(r#"og:url" content="https://darekagakaku.day/entries/2025-01-15"#));
+    }
+
+    #[test]
+    fn test_render_entry_without_image_uses_og_card() {
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "本文".to_string(),
+            created_at: "2025-01-15T10:00:00Z".to_string(),
+            updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: None,
+        };
+        let html = render_entry(&entry, false);
+        assert!(html.contains(
+            r#"<meta property="og:image" content="https://darekagakaku.day/og/2025-01-15.png">"#
+        ));
+    }
+
+    #[test]
+    fn test_render_entry_with_image_uses_uploaded_image_for_og() {
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "本文".to_string(),
+            created_at: "2025-01-15T10:00:00Z".to_string(),
+            updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: Some("image/webp".to_string()),
+        };
+        let html = render_entry(&entry, false);
+        assert!(html.contains(
+            r#"<meta property="og:image" content="https://darekagakaku.day/images/2025-01-15">"#
+        ));
+    }
+
+    #[test]
+    fn test_render_entry_with_image_declares_webp_type() {
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "本文".to_string(),
+            created_at: "2025-01-15T10:00:00Z".to_string(),
+            updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: Some("image/webp".to_string()),
+        };
+        let html = render_entry(&entry, false);
+        assert!(html.contains(r#"<meta property="og:image:type" content="image/webp">"#));
+    }
+
+    #[test]
+    fn test_render_entry_with_image_omits_fixed_dimensions() {
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "本文".to_string(),
+            created_at: "2025-01-15T10:00:00Z".to_string(),
+            updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: Some("image/webp".to_string()),
+        };
+        let html = render_entry(&entry, false);
+        assert!(!html.contains(r#"<meta property="og:image:width""#));
     }
 }
