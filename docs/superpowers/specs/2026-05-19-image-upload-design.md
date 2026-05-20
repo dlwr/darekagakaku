@@ -55,7 +55,7 @@ ALTER TABLE diary_entries ADD COLUMN image_mime TEXT;
   - PNG: `89 50 4E 47 0D 0A 1A 0A`
   - WebP: `RIFF....WEBP`
 - **サイズ上限**: 3 MB（`3 * 1024 * 1024` bytes）
-- **Turnstile**: POSTでは必須（DELETEは認証不要、レートリミットのみ）
+- **Turnstile**: POST/DELETE どちらも必須（DELETEは破壊的操作のため）
 - **レートリミット**: 既存KV `RATE_LIMIT` を共有
 
 ## エラーレスポンス
@@ -74,17 +74,19 @@ ALTER TABLE diary_entries ADD COLUMN image_mime TEXT;
   - 日付フォーマットチェック
   - D1から `image_mime` を取得 → なければ 404
   - R2から `entries/{date}` を取得 → なければ 404
-  - レスポンス: `Content-Type: {image_mime}`、`Cache-Control: public, max-age=31536000, immutable`（同日内の差し替え時はキー単位ではURLが変わらないため即時反映は期待しない。差し替え直後の閲覧者には古い画像が見える可能性があるが、許容範囲）
+  - レスポンス: `Content-Type: {image_mime}`、`Cache-Control: public, max-age=3600`（同日内の差し替えがあるためimmutableは避け、1時間のキャッシュに留める）
 
 ## UI
 
 ### ホーム（`render_home`）
 
-- 既存テキストエリアの下に：
-  - 既存画像がある場合: プレビュー画像 + 「画像を削除」ボタン
-  - `<input type="file" accept="image/jpeg,image/png,image/webp">`
-  - 「画像をアップロード」ボタン
-- テキストフォーム送信とは独立。Turnstileは新しいウィジェットを画像用にもう一つ生成 or 既存トークンを共有（既存と同じ`turnstileWidgetId`を流用すれば追加描画不要）
+画像をテキストエリアの**背景**として表示する（2026-05-20 デザイン決定）。
+
+- **画像あり**: テキストエリアの背景に画像を敷き、上から白70%スクリム（`linear-gradient(rgba(255,255,255,0.7), rgba(255,255,255,0.7))`）を重ねて黒文字の可読性を確保。`background-size: cover; background-repeat: no-repeat`。テキストエリア右上に「差し替え」「削除」ボタンを重ねる（半透明黒背景）。
+  - 注意: インラインの `background:` ショートハンドは `background-size` をリセットしてタイル化を招くため、`background-image` のlonghandを使い、size/repeat/positionはCSS側で指定する。
+- **画像なし**: 通常の白背景テキストエリア＋下に「画像を追加」破線ラベルボタン（`<label>` + 隠しファイル入力）
+- ファイル選択時に自動アップロード（`change` イベント → `uploadImage`）。「差し替え」も隠しファイル入力を `click()` して同じフローに合流。
+- Turnstileは既存の `turnstileWidgetId` を共有。
 
 ### 日記ページ（`render_entry`）
 
