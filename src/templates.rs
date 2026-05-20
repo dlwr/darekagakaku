@@ -239,6 +239,59 @@ fn html_head(title: &str, description: Option<&str>, path: &str, og_image: Optio
             from {{ opacity: 1; }}
             to {{ opacity: 0; }}
         }}
+        .entry-image {{
+            margin: 20px 0;
+        }}
+        .entry-image img {{
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }}
+        .textarea-wrap {{
+            position: relative;
+        }}
+        .textarea-wrap.has-image textarea {{
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            color: #1a1a1a;
+        }}
+        .textarea-wrap.has-image textarea::placeholder {{
+            color: #555;
+        }}
+        .image-controls {{
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            gap: 6px;
+        }}
+        .image-controls button {{
+            margin-top: 0;
+            padding: 6px 12px;
+            font-size: 13px;
+            background-color: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(2px);
+        }}
+        .image-controls button:hover {{
+            background-color: rgba(0, 0, 0, 0.7);
+        }}
+        #image-section {{
+            margin: 12px 0;
+        }}
+        .file-button {{
+            display: inline-block;
+            padding: 10px 18px;
+            font-size: 14px;
+            color: #555;
+            background-color: #f0f1f3;
+            border: 1px dashed #bbb;
+            border-radius: 6px;
+            cursor: pointer;
+        }}
+        .file-button:hover {{
+            background-color: #e8e9ec;
+        }}
     </style>
 </head>
 <body>"#,
@@ -265,6 +318,36 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
     let today = today_jst();
     let content = entry.map(|e| escape_html(&e.content)).unwrap_or_default();
     let turnstile_key = escape_html(turnstile_site_key);
+    let has_image = entry.and_then(|e| e.image_mime.as_ref()).is_some();
+    let today_esc = escape_html(&today);
+
+    let (wrap_class, textarea_style, overlay_controls, image_section) = if has_image {
+        (
+            " has-image",
+            format!(
+                "background-image: linear-gradient(rgba(255,255,255,0.7), rgba(255,255,255,0.7)), url('/images/{today}');",
+                today = today_esc
+            ),
+            r#"<div class="image-controls">
+            <button type="button" id="replace-image-btn">差し替え</button>
+            <button type="button" id="delete-image-btn">削除</button>
+        </div>
+        <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden>"#
+                .to_string(),
+            String::new(),
+        )
+    } else {
+        (
+            "",
+            String::new(),
+            String::new(),
+            r#"<div id="image-section">
+        <label for="image-input" class="file-button">画像を追加（任意・1枚・3MBまで）</label>
+        <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden>
+    </div>"#
+                .to_string(),
+        )
+    };
 
     format!(
         r#"{head}
@@ -272,8 +355,11 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
     <h1>誰かが書く日記</h1>
     <p class="date">{today}の日記</p>
     <form id="diary-form">
-        <textarea name="content" placeholder="今日の日記を書いてください...">{content}</textarea>
-        <br>
+        <div class="textarea-wrap{wrap_class}">
+            <textarea name="content" placeholder="今日の日記を書いてください..." style="{textarea_style}">{content}</textarea>
+            {overlay_controls}
+        </div>
+        {image_section}
         <div id="turnstile-container"></div>
         <button type="submit">保存する</button>
     </form>
@@ -291,11 +377,21 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
             }});
         }}
     }}
+    function getTurnstileToken() {{
+        return turnstileWidgetId ? turnstile.getResponse(turnstileWidgetId) : null;
+    }}
+    function showToast(msg) {{
+        var toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = msg;
+        document.body.appendChild(toast);
+        setTimeout(function() {{ toast.remove(); }}, 3000);
+    }}
     document.getElementById('diary-form').addEventListener('submit', function(e) {{
         e.preventDefault();
         var form = this;
-        var btn = form.querySelector('button');
-        var token = turnstileWidgetId ? turnstile.getResponse(turnstileWidgetId) : null;
+        var btn = form.querySelector('button[type="submit"]');
+        var token = getTurnstileToken();
         if (!token) {{
             alert('認証処理中です。少々お待ちください。');
             return;
@@ -311,11 +407,7 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
             }})
         }}).then(function(res) {{
             if (res.ok) {{
-                var toast = document.createElement('div');
-                toast.className = 'toast';
-                toast.textContent = '保存しました';
-                document.body.appendChild(toast);
-                setTimeout(function() {{ toast.remove(); }}, 3000);
+                showToast('保存しました');
                 turnstile.reset(turnstileWidgetId);
             }} else if (res.status === 429) {{
                 alert('投稿制限中です。しばらくお待ちください。');
@@ -329,6 +421,80 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
             btn.textContent = '保存する';
         }});
     }});
+
+    function uploadImage(file) {{
+        if (!file) return;
+        if (file.size > 3 * 1024 * 1024) {{
+            alert('画像サイズは3MBまでです');
+            return;
+        }}
+        var token = getTurnstileToken();
+        if (!token) {{
+            alert('認証処理中です。少々お待ちください。');
+            return;
+        }}
+        var fd = new FormData();
+        fd.append('image', file);
+        fd.append('turnstile_token', token);
+        fetch('/api/today/image', {{ method: 'POST', body: fd }})
+            .then(function(res) {{
+                if (res.ok) {{
+                    showToast('画像をアップロードしました');
+                    turnstile.reset(turnstileWidgetId);
+                    setTimeout(function() {{ location.reload(); }}, 800);
+                }} else if (res.status === 413) {{
+                    alert('画像サイズが大きすぎます（3MBまで）');
+                }} else if (res.status === 400) {{
+                    alert('画像形式が不正です（JPEG/PNG/WebPのみ）');
+                }} else {{
+                    alert('アップロードに失敗しました');
+                }}
+            }})
+            .catch(function() {{ alert('アップロードに失敗しました'); }});
+    }}
+
+    var imageInput = document.getElementById('image-input');
+    if (imageInput) {{
+        imageInput.addEventListener('change', function() {{
+            uploadImage(imageInput.files && imageInput.files[0]);
+        }});
+    }}
+
+    var replaceBtn = document.getElementById('replace-image-btn');
+    if (replaceBtn && imageInput) {{
+        replaceBtn.addEventListener('click', function() {{
+            imageInput.click();
+        }});
+    }}
+
+    var deleteBtn = document.getElementById('delete-image-btn');
+    if (deleteBtn) {{
+        deleteBtn.addEventListener('click', function() {{
+            if (!confirm('画像を削除しますか？')) return;
+            var token = getTurnstileToken();
+            if (!token) {{
+                alert('認証処理中です。少々お待ちください。');
+                return;
+            }}
+            deleteBtn.disabled = true;
+            fetch('/api/today/image', {{
+                method: 'DELETE',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ turnstile_token: token }})
+            }})
+                .then(function(res) {{
+                    if (res.ok) {{
+                        showToast('画像を削除しました');
+                        turnstile.reset(turnstileWidgetId);
+                        setTimeout(function() {{ location.reload(); }}, 800);
+                    }} else {{
+                        alert('削除に失敗しました');
+                    }}
+                }})
+                .catch(function() {{ alert('削除に失敗しました'); }})
+                .finally(function() {{ deleteBtn.disabled = false; }});
+        }});
+    }}
     </script>
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=initTurnstile" async defer></script>
 {footer}"#,
@@ -336,6 +502,10 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
         nav = html_nav(),
         today = today,
         content = content,
+        wrap_class = wrap_class,
+        textarea_style = textarea_style,
+        overlay_controls = overlay_controls,
+        image_section = image_section,
         turnstile_key = turnstile_key,
         footer = html_footer()
     )
@@ -381,10 +551,20 @@ pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
         ""
     };
 
+    let image_html = if entry.image_mime.is_some() {
+        format!(
+            r#"<div class="entry-image"><img src="/images/{date}" alt=""></div>"#,
+            date = escape_html(&entry.date)
+        )
+    } else {
+        String::new()
+    };
+
     format!(
         r#"{head}
     {nav}
     <h1>{date}の日記</h1>
+    {image_html}
     <div class="content">{content}</div>
     {edit_link}
 {footer}"#,
@@ -396,6 +576,7 @@ pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
         ),
         nav = html_nav(),
         date = escape_html(&entry.date),
+        image_html = image_html,
         content = linkify(&escape_html(&entry.content)),
         edit_link = edit_link,
         footer = html_footer()
@@ -693,6 +874,7 @@ mod tests {
                 content: "今日はいい天気だった".to_string(),
                 created_at: "2025-01-15T10:00:00Z".to_string(),
                 updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: None,
             },
         ];
         let rss = render_rss(&entries, "https://example.com");
@@ -709,6 +891,7 @@ mod tests {
                 content: "<script>alert('xss')</script>".to_string(),
                 created_at: "2025-01-15T10:00:00Z".to_string(),
                 updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: None,
             },
         ];
         let rss = render_rss(&entries, "https://example.com");
@@ -725,6 +908,7 @@ mod tests {
                 content: long_content,
                 created_at: "2025-01-15T10:00:00Z".to_string(),
                 updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: None,
             },
         ];
         let rss = render_rss(&entries, "https://example.com");
@@ -887,6 +1071,7 @@ mod tests {
             content: "見て https://example.com いいね".to_string(),
             created_at: "2025-01-15T10:00:00Z".to_string(),
             updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: None,
         };
         let html = render_entry(&entry, false);
         assert!(html.contains(r#"<a href="https://example.com""#));
@@ -899,6 +1084,7 @@ mod tests {
             content: "これは日記の内容です。".to_string(),
             created_at: "2025-01-15T10:00:00Z".to_string(),
             updated_at: "2025-01-15T10:00:00Z".to_string(),
+            image_mime: None,
         };
         let html = render_entry(&entry, false);
         assert!(html.contains(r#"og:description" content="これは日記の内容です。"#));
