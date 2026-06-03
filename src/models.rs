@@ -84,6 +84,7 @@ pub struct DiaryListResponse {
 pub struct DiaryEntrySummary {
     pub date: String,
     pub preview: String,
+    pub has_image: bool,
 }
 
 impl DiaryEntrySummary {
@@ -98,6 +99,7 @@ impl DiaryEntrySummary {
         Self {
             date: entry.date.clone(),
             preview,
+            has_image: entry.image_mime.is_some(),
         }
     }
 }
@@ -235,5 +237,31 @@ mod tests {
         let summary = DiaryEntrySummary::from_entry(&entry);
         assert!(summary.preview.ends_with("..."));
         assert_eq!(summary.preview.chars().count(), 103); // 100 + "..."
+    }
+
+    #[test]
+    fn test_diary_entry_summary_has_image_true() {
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "".to_string(),
+            created_at: "2025-01-15T00:00:00Z".to_string(),
+            updated_at: "2025-01-15T00:00:00Z".to_string(),
+            image_mime: Some("image/webp".to_string()),
+        };
+        let summary = DiaryEntrySummary::from_entry(&entry);
+        assert!(summary.has_image);
+    }
+
+    #[test]
+    fn test_diary_entry_summary_has_image_false() {
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "テキストだけ".to_string(),
+            created_at: "2025-01-15T00:00:00Z".to_string(),
+            updated_at: "2025-01-15T00:00:00Z".to_string(),
+            image_mime: None,
+        };
+        let summary = DiaryEntrySummary::from_entry(&entry);
+        assert!(!summary.has_image);
     }
 }
