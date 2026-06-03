@@ -30,14 +30,22 @@ pub async fn set_image_mime(db: &D1Database, date: &str, mime: &str) -> Result<(
     Ok(())
 }
 
-/// 今日の日記の画像MIMEをクリア
+/// 今日の日記の画像MIMEをクリア。
+/// 本文が空のエントリは画像を消すと完全な空白になるため、行ごと削除する。
 pub async fn clear_image_mime(db: &D1Database, date: &str) -> Result<()> {
     let now = now_iso8601();
-    let stmt = db.prepare(
-        "UPDATE diary_entries SET image_mime = NULL, updated_at = ?2 WHERE date = ?1",
+
+    // 本文が空ならエントリ自体を削除（空白の日記が残らないように）
+    let delete = db.prepare("DELETE FROM diary_entries WHERE date = ?1 AND content = ''");
+    let delete = delete.bind_refs(&D1Type::Text(date))?;
+    delete.run().await?;
+
+    // 本文がある場合は画像MIMEだけNULLにする
+    let update = db.prepare(
+        "UPDATE diary_entries SET image_mime = NULL, updated_at = ?2 WHERE date = ?1 AND content != ''",
     );
-    let stmt = stmt.bind_refs(&[D1Type::Text(date), D1Type::Text(&now)])?;
-    stmt.run().await?;
+    let update = update.bind_refs(&[D1Type::Text(date), D1Type::Text(&now)])?;
+    update.run().await?;
     Ok(())
 }
 
@@ -145,10 +153,14 @@ pub async fn get_version(db: &D1Database, date: &str, version: i32) -> Result<Op
 pub async fn list_past_entries(db: &D1Database, limit: i32) -> Result<Vec<DiaryEntry>> {
     let today = today_jst();
 
+    // 本文も画像も無い空白エントリは一覧（RSS含む）から除外する。
+    // 本文は空文字('')かトリム済み非空のいずれか（テキスト投稿は空白のみを弾き、
+    // 画像アップロードは''で挿入する）なので、content != '' でDiaryEntry::is_blankと一致する。
     let stmt = db.prepare(
         "SELECT date, content, created_at, updated_at, image_mime
          FROM diary_entries
          WHERE date < ?1
+           AND (content != '' OR image_mime IS NOT NULL)
          ORDER BY date DESC
          LIMIT ?2"
     );

@@ -112,6 +112,11 @@ pub async fn entry_page(_req: Request, ctx: RouteContext<()>) -> Result<Response
     }
 
     match db::get_entry(&db, date).await {
+        // 本文も画像も無い空白エントリは存在しないものとして扱う
+        Ok(Some(entry)) if entry.is_blank() => {
+            let html = templates::render_not_found();
+            Response::from_html(html).map(|r| r.with_status(404))
+        }
         Ok(Some(entry)) => {
             let can_edit = is_today(date);
             let html = templates::render_entry(&entry, can_edit);

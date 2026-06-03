@@ -11,6 +11,14 @@ pub struct DiaryEntry {
     pub image_mime: Option<String>,
 }
 
+impl DiaryEntry {
+    /// 本文も画像も無い空白エントリかどうかを判定する。
+    /// 画像だけの日記（本文なし）は空白とはみなさない。
+    pub fn is_blank(&self) -> bool {
+        self.content.trim().is_empty() && self.image_mime.is_none()
+    }
+}
+
 /// APIレスポンス用の日記エントリ
 #[derive(Debug, Serialize)]
 pub struct DiaryEntryResponse {
@@ -148,6 +156,58 @@ pub struct VersionDetailResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_blank_no_content_no_image() {
+        // 本文も画像も無い → 空白
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "".to_string(),
+            created_at: "2025-01-15T00:00:00Z".to_string(),
+            updated_at: "2025-01-15T00:00:00Z".to_string(),
+            image_mime: None,
+        };
+        assert!(entry.is_blank());
+    }
+
+    #[test]
+    fn test_is_blank_whitespace_only_no_image() {
+        // 空白文字だけで画像も無い → 空白
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "  \n\t".to_string(),
+            created_at: "2025-01-15T00:00:00Z".to_string(),
+            updated_at: "2025-01-15T00:00:00Z".to_string(),
+            image_mime: None,
+        };
+        assert!(entry.is_blank());
+    }
+
+    #[test]
+    fn test_is_blank_with_content() {
+        // 本文がある → 空白ではない
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "日記".to_string(),
+            created_at: "2025-01-15T00:00:00Z".to_string(),
+            updated_at: "2025-01-15T00:00:00Z".to_string(),
+            image_mime: None,
+        };
+        assert!(!entry.is_blank());
+    }
+
+    #[test]
+    fn test_is_blank_image_only() {
+        // 画像だけ・本文なし → 空白ではない（写真だけの日記はアリ）
+        let entry = DiaryEntry {
+            date: "2025-01-15".to_string(),
+            content: "".to_string(),
+            created_at: "2025-01-15T00:00:00Z".to_string(),
+            updated_at: "2025-01-15T00:00:00Z".to_string(),
+            image_mime: Some("image/webp".to_string()),
+        };
+        assert!(!entry.is_blank());
+    }
 
     #[test]
     fn test_diary_entry_summary_short_content() {
