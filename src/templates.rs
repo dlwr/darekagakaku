@@ -336,7 +336,7 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
         (
             " has-image",
             format!(
-                "background-image: linear-gradient(rgba(255,255,255,0.7), rgba(255,255,255,0.7)), url('/images/{today}');",
+                "background-image: linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)), url('/images/{today}');",
                 today = today_esc
             ),
             r#"<div id="image-section">
