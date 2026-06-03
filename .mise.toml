@@ -1,0 +1,39 @@
+[tools]
+node = "22"
+rust = "latest"
+"npm:wrangler" = "latest"
+
+[tasks.deploy]
+description = "Deploy all workers"
+depends = ["deploy:og", "deploy:main"]
+
+[tasks."deploy:main"]
+description = "Deploy main Rust worker"
+run = "wrangler deploy"
+
+[tasks."deploy:og"]
+description = "Deploy OG image worker"
+dir = "og-worker"
+run = "npx wrangler deploy"
+
+[tasks.dev]
+description = "Run main worker locally"
+run = "wrangler dev"
+
+[tasks."dev:og"]
+description = "Run OG worker locally"
+dir = "og-worker"
+run = "npx wrangler dev"
+
+[tasks.test]
+description = "Run all tests"
+depends = ["test:rust", "test:og"]
+
+[tasks."test:rust"]
+description = "Run Rust tests"
+run = "cargo test"
+
+[tasks."test:og"]
+description = "Run OG worker tests"
+dir = "og-worker"
+run = "npm test"

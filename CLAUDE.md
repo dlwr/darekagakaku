@@ -8,13 +8,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 開発コマンド
 
+タスクランナーに [mise](https://mise.jdx.dev/) を使用。`mise install` でツールのセットアップ完了。
+
 ```bash
-# ビルド
-cargo build --release
+# 全workerデプロイ（OG worker → main workerの順）
+mise run deploy
+
+# 個別デプロイ
+mise run deploy:main
+mise run deploy:og
 
 # ローカル開発サーバー起動
-npx wrangler dev
+mise run dev        # main worker
+mise run dev:og     # OG worker
 
+# テスト実行
+mise run test       # 全テスト
+mise run test:rust  # Rustテストのみ
+mise run test:og    # OGワーカーテストのみ
+
+# タスク一覧
+mise tasks ls
+```
+
+### D1データベース操作
+
+```bash
 # D1データベース作成（初回のみ）
 npx wrangler d1 create darekagakaku-db
 
@@ -23,12 +42,6 @@ npx wrangler d1 execute darekagakaku-db --local --file=schema.sql
 
 # スキーマ適用（本番）
 npx wrangler d1 execute darekagakaku-db --remote --file=schema.sql
-
-# デプロイ
-npx wrangler deploy
-
-# テスト実行
-cargo test
 ```
 
 ## アーキテクチャ
