@@ -210,59 +210,62 @@ fn html_head(title: &str, description: Option<&str>, path: &str, og_image: Optio
             color: #666;
             font-size: 0.9em;
         }}
-        .masonry {{
+        /* Tumblrアーカイブ風: 月見出し + 正方形タイルの均一グリッド */
+        .archive-month {{
+            font-size: 1.05em;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 30px 0 12px;
+        }}
+        .archive-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-            column-gap: 14px;
-            align-items: start;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
         }}
-        /* JS無効時のフォールバック: 通常グリッド（行は揃うが左→右の時系列は保つ） */
-        .masonry:not(.is-masonry) {{
-            row-gap: 14px;
-        }}
-        /* JS有効時: 8px単位の行に各カードの高さ分をspanさせて隙間を詰める */
-        .masonry.is-masonry {{
-            grid-auto-rows: 8px;
-        }}
-        .masonry-card {{
+        .archive-tile {{
+            position: relative;
             display: block;
-            margin: 0;
-            background: white;
-            border: 1px solid #eee;
-            border-radius: 10px;
+            aspect-ratio: 1 / 1;
             overflow: hidden;
+            border-radius: 4px;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
             text-decoration: none;
             color: inherit;
-            transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
         }}
-        .masonry-card:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 6px 18px rgba(0,0,0,0.08);
-            border-color: #3498db;
-        }}
-        .masonry-card img {{
+        .archive-tile.is-photo img {{
             display: block;
             width: 100%;
-            height: auto;
+            height: 100%;
+            object-fit: cover;
         }}
-        .masonry-body {{
-            padding: 12px 14px;
-        }}
-        .masonry-date {{
-            font-weight: bold;
-            font-size: 0.85em;
-            color: #2c3e50;
-        }}
-        .masonry-preview {{
-            margin-top: 6px;
-            font-size: 0.9em;
-            color: #555;
+        .archive-tile.is-text .tile-text {{
+            height: 100%;
+            padding: 14px;
+            font-size: 1.15em;
+            line-height: 1.55;
+            color: #222;
             white-space: pre-wrap;
-            word-wrap: break-word;
-            display: -webkit-box;
-            -webkit-line-clamp: 10;
-            -webkit-box-orient: vertical;
+            word-break: break-word;
             overflow: hidden;
+            -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
+            mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
+        }}
+        .tile-date {{
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 16px 10px 7px;
+            font-size: 0.78em;
+            font-weight: bold;
+            color: #fff;
+            background: linear-gradient(transparent, rgba(0,0,0,0.65));
+            opacity: 0;
+            transition: opacity 0.12s ease;
+        }}
+        .archive-tile:hover .tile-date {{
+            opacity: 1;
         }}
         .content {{
             background: white;
@@ -597,97 +600,73 @@ pub fn render_home(entry: Option<&DiaryEntry>, turnstile_site_key: &str) -> Stri
     )
 }
 
-/// マソンリーグリッドの1カードを描画する。
-/// 画像エントリは画像を、テキストのみのエントリはプレビュー文を表示し、
-/// 日付は常に表示する。本文が空（画像のみ）の場合はプレビューdivを省く。
-fn render_archive_card(e: &DiaryEntrySummary) -> String {
-    let date = escape_html(&e.date);
+/// "2026-01-15" -> "2026年1月" の見出しラベルに変換する。
+fn year_month_label(date: &str) -> String {
+    let parts: Vec<&str> = date.split('-').collect();
+    if parts.len() >= 2 {
+        let month = parts[1].trim_start_matches('0');
+        format!("{}年{}月", parts[0], month)
+    } else {
+        date.to_string()
+    }
+}
 
-    let preview_block = if e.preview.trim().is_empty() {
-        String::new()
+/// アーカイブの1タイル（正方形）を描画する。
+/// 画像エントリは画像をクロップ表示、テキストエントリは本文プレビューを大きめに表示し
+/// 下端をフェードアウトさせる。日付はホバー時にオーバーレイ表示する。
+fn render_archive_tile(e: &DiaryEntrySummary) -> String {
+    let date = escape_html(&e.date);
+    let date_overlay = format!(r#"<span class="tile-date">{date}</span>"#);
+
+    if e.has_image {
+        format!(
+            r#"<a class="archive-tile is-photo" href="/entries/{date}" title="{date}"><img src="/images/{date}" alt="" loading="lazy">{date_overlay}</a>"#
+        )
     } else {
         format!(
-            r#"<div class="masonry-preview">{}</div>"#,
-            escape_html(&e.preview)
+            r#"<a class="archive-tile is-text" href="/entries/{date}" title="{date}"><div class="tile-text">{preview}</div>{date_overlay}</a>"#,
+            preview = escape_html(&e.preview)
         )
-    };
-
-    let image_block = if e.has_image {
-        format!(r#"<img src="/images/{date}" alt="" loading="lazy">"#)
-    } else {
-        String::new()
-    };
-
-    let card_class = if e.has_image {
-        "masonry-card has-image"
-    } else {
-        "masonry-card"
-    };
-
-    format!(
-        r#"<a class="{card_class}" href="/entries/{date}">{image_block}<div class="masonry-body"><div class="masonry-date">{date}</div>{preview_block}</div></a>"#
-    )
+    }
 }
 
 pub fn render_archive(entries: &[DiaryEntrySummary]) -> String {
-    let (entries_html, script) = if entries.is_empty() {
-        (
-            r#"<p class="empty">まだ過去の日記はありません</p>"#.to_string(),
-            String::new(),
-        )
+    let body = if entries.is_empty() {
+        r#"<p class="empty">まだ過去の日記はありません</p>"#.to_string()
     } else {
-        let cards: Vec<String> = entries.iter().map(render_archive_card).collect();
-        (
-            format!(r#"<div class="masonry">{}</div>"#, cards.join("\n")),
-            masonry_script().to_string(),
-        )
+        // 日付降順で並んだエントリを年月ごとに見出しで区切り、正方形タイルのグリッドにする。
+        let mut out = String::new();
+        let mut current_month: Option<String> = None;
+        for e in entries {
+            let month_key = e.date.get(0..7).unwrap_or(e.date.as_str());
+            if current_month.as_deref() != Some(month_key) {
+                if current_month.is_some() {
+                    out.push_str("</div>");
+                }
+                out.push_str(&format!(
+                    r#"<h2 class="archive-month">{}</h2><div class="archive-grid">"#,
+                    escape_html(&year_month_label(&e.date))
+                ));
+                current_month = Some(month_key.to_string());
+            }
+            out.push_str(&render_archive_tile(e));
+        }
+        out.push_str("</div>");
+        // /entries はTumblrの壁のように横幅を広げる（このページ限定でbodyの幅制限を上書き）
+        format!("<style>body {{ max-width: 1400px; }}</style>{}", out)
     };
 
     format!(
         r#"{head}
     {nav}
     <h1>過去の日記</h1>
-    {entries}
-    {script}
+    {body}
 {footer}"#,
         head = html_head("過去の日記", Some("過去の日記一覧"), "/entries", Some("https://darekagakaku.day/og/default.png")),
         nav = html_nav(),
-        entries = entries_html,
-        script = script,
+        body = body,
         footer = html_footer()
     )
-}
-
-/// 行方向（左→右が新しい順）のマソンリーを実現するスクリプト。
-/// 各カードの実際の高さから 8px 行の span 数を計算してグリッドに詰める。
-/// JSが無効・実行前は通常グリッド（行が揃う）として読めるフォールバックになる。
-fn masonry_script() -> &'static str {
-    r#"<script>
-    (function() {
-        var grid = document.querySelector('.masonry');
-        if (!grid) return;
-        var ROW = 8, GAP = 14;
-        function layout() {
-            grid.classList.remove('is-masonry');
-            var cards = grid.querySelectorAll('.masonry-card');
-            var heights = [];
-            for (var i = 0; i < cards.length; i++) {
-                heights.push(cards[i].getBoundingClientRect().height);
-            }
-            grid.classList.add('is-masonry');
-            for (var j = 0; j < cards.length; j++) {
-                var span = Math.ceil((heights[j] + GAP) / ROW);
-                cards[j].style.gridRowEnd = 'span ' + span;
-            }
-        }
-        layout();
-        window.addEventListener('resize', layout);
-        var imgs = grid.querySelectorAll('img');
-        for (var k = 0; k < imgs.length; k++) {
-            if (!imgs[k].complete) imgs[k].addEventListener('load', layout);
-        }
-    })();
-    </script>"#
 }
 
 pub fn render_entry(entry: &DiaryEntry, can_edit: bool) -> String {
@@ -1012,72 +991,105 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_render_archive_uses_masonry_container() {
+    fn test_render_archive_uses_square_grid() {
         let entries = vec![DiaryEntrySummary {
             date: "2025-01-15".to_string(),
             preview: "テキストの日記".to_string(),
             has_image: false,
         }];
         let html = render_archive(&entries);
-        assert!(html.contains(r#"<div class="masonry">"#));
+        assert!(html.contains(r#"<div class="archive-grid">"#));
     }
 
     #[test]
-    fn test_render_archive_masonry_css_present() {
+    fn test_render_archive_grid_css_present() {
         let html = render_archive(&[]);
-        assert!(html.contains(".masonry {"));
-        assert!(html.contains("display: grid"));
+        assert!(html.contains(".archive-grid {"));
+        assert!(html.contains("aspect-ratio: 1 / 1"));
     }
 
     #[test]
-    fn test_render_archive_includes_masonry_script() {
-        // 左→右（行方向）のマソンリーは各カードの高さから行スパンを計算するJSで実現する
-        let entries = vec![DiaryEntrySummary {
-            date: "2025-01-15".to_string(),
-            preview: "本文".to_string(),
-            has_image: false,
-        }];
+    fn test_render_archive_groups_by_month() {
+        let entries = vec![
+            DiaryEntrySummary {
+                date: "2026-01-15".to_string(),
+                preview: "1月の日記".to_string(),
+                has_image: false,
+            },
+            DiaryEntrySummary {
+                date: "2025-12-31".to_string(),
+                preview: "12月の日記".to_string(),
+                has_image: false,
+            },
+        ];
         let html = render_archive(&entries);
-        assert!(html.contains("gridRowEnd"));
-        assert!(html.contains("is-masonry"));
+        assert!(html.contains(r#"<h2 class="archive-month">2026年1月</h2>"#));
+        assert!(html.contains(r#"<h2 class="archive-month">2025年12月</h2>"#));
     }
 
     #[test]
-    fn test_render_archive_image_entry_renders_img() {
+    fn test_render_archive_same_month_shares_single_heading() {
+        let entries = vec![
+            DiaryEntrySummary {
+                date: "2026-01-20".to_string(),
+                preview: "後半".to_string(),
+                has_image: false,
+            },
+            DiaryEntrySummary {
+                date: "2026-01-05".to_string(),
+                preview: "前半".to_string(),
+                has_image: false,
+            },
+        ];
+        let html = render_archive(&entries);
+        assert_eq!(html.matches(r#"class="archive-month""#).count(), 1);
+    }
+
+    #[test]
+    fn test_render_archive_photo_tile_renders_cropped_img() {
         let entries = vec![DiaryEntrySummary {
             date: "2025-01-15".to_string(),
             preview: "".to_string(),
             has_image: true,
         }];
         let html = render_archive(&entries);
+        assert!(html.contains(r#"class="archive-tile is-photo""#));
         assert!(html.contains(r#"<img src="/images/2025-01-15""#));
         assert!(html.contains(r#"loading="lazy""#));
     }
 
     #[test]
-    fn test_render_archive_text_entry_renders_preview() {
+    fn test_render_archive_text_tile_renders_preview() {
         let entries = vec![DiaryEntrySummary {
             date: "2025-01-15".to_string(),
             preview: "今日のできごと".to_string(),
             has_image: false,
         }];
         let html = render_archive(&entries);
-        assert!(html.contains("今日のできごと"));
+        assert!(html.contains(r#"class="archive-tile is-text""#));
+        assert!(html.contains(r#"<div class="tile-text">今日のできごと</div>"#));
         assert!(!html.contains(r#"<img src="/images/"#));
     }
 
     #[test]
-    fn test_render_archive_image_only_entry_omits_preview_block() {
+    fn test_render_archive_tile_has_date_on_hover_overlay() {
         let entries = vec![DiaryEntrySummary {
             date: "2025-01-15".to_string(),
-            preview: "".to_string(),
-            has_image: true,
+            preview: "本文".to_string(),
+            has_image: false,
         }];
         let html = render_archive(&entries);
-        // 画像のみ（本文なし）のときは空のプレビューdivを出さない
-        assert!(!html.contains(r#"class="masonry-preview""#));
-        // 日付は常に表示する
-        assert!(html.contains(r#"class="masonry-date">2025-01-15"#));
+        assert!(html.contains(r#"<span class="tile-date">2025-01-15</span>"#));
+    }
+
+    #[test]
+    fn test_year_month_label_strips_leading_zero() {
+        assert_eq!(year_month_label("2026-01-15"), "2026年1月");
+    }
+
+    #[test]
+    fn test_year_month_label_double_digit_month() {
+        assert_eq!(year_month_label("2025-12-31"), "2025年12月");
     }
 
     #[test]
