@@ -54,6 +54,7 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 - [pages.rs](src/pages.rs) - HTMLページハンドラ（フォーム処理含む）
 - [handlers.rs](src/handlers.rs) - JSON APIハンドラ
 - [templates.rs](src/templates.rs) - HTMLテンプレート生成（手書きHTML）
+- [agents.rs](src/agents.rs) - クローラ・エージェント向けテキスト生成（robots.txt、サイトマップ、Markdown）
 - [models.rs](src/models.rs) - データ構造とSerdeシリアライズ
 - [db.rs](src/db.rs) - D1データベース操作
 - [time.rs](src/time.rs) - JST時刻処理（js-sys経由）
@@ -65,6 +66,9 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 | `/` | GET | 今日の日記フォーム |
 | `/a` | GET | Aboutページ |
 | `/feed` | GET | RSSフィード |
+| `/robots.txt` | GET | クローラ向けルール（Content Signals・サイトマップ参照） |
+| `/sitemap.xml` | GET | サイトマップ |
+| `/llms.txt` | GET | エージェント向けのサイト案内 |
 | `/entries` | GET | 過去の日記一覧 |
 | `/entries/:date` | GET | 特定日の日記 |
 | `/admin/login` | GET/POST | 管理者ログイン（Cookie認証） |
@@ -77,6 +81,8 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 | `/api/entries/:date` | GET | 特定日API |
 | `/api/admin/entries/:date/versions` | GET | 管理者用：バージョン一覧API |
 | `/api/admin/entries/:date/versions/:version` | GET | 管理者用：バージョン詳細API |
+
+`/`・`/entries`・`/entries/:date` は `Accept: text/markdown` でMarkdownを返す。
 
 ### データベース
 
