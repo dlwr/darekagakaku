@@ -2,7 +2,8 @@ use serde::Deserialize;
 use worker::d1::D1Database;
 use worker::{Headers, Request, Response, Result, RouteContext};
 
-use crate::agent_token::{self, TokenStatus};
+use crate::agent_token;
+use crate::agent_write::{self, Refusal};
 use crate::auth;
 use crate::db;
 use crate::image::{detect_image_mime, MAX_IMAGE_SIZE};
@@ -13,8 +14,6 @@ use crate::models::{
 use crate::rate_limit;
 use crate::time::{is_today, is_valid_date, today_jst};
 use crate::turnstile;
-
-const MAX_CONTENT_LENGTH: usize = 10000;
 
 #[derive(Deserialize)]
 struct PostTodayRequest {
@@ -188,8 +187,6 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
             .map(|r| r.with_status(429));
     }
 
-    let db: D1Database = ctx.env.d1("DB")?;
-
     let body: PostTodayRequest = match req.json().await {
         Ok(body) => body,
         Err(_) => {
@@ -199,75 +196,60 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
     };
 
     let authorization = req.headers().get("Authorization")?;
-    let bearer = agent_token::bearer_token(authorization.as_deref());
-
-    if let Some(token) = bearer {
-        match agent_token::status(&kv, token, &today_jst()).await? {
-            TokenStatus::Usable => {}
-            TokenStatus::Unknown => {
+    let content = if agent_token::bearer_token(authorization.as_deref()).is_some() {
+        match agent_write::write_today(&ctx.env, authorization.as_deref(), &body.content).await? {
+            Ok(content) => content,
+            Err(refusal) => {
+                let status = match refusal {
+                    Refusal::Unauthorized => 401,
+                    Refusal::DailyLimitReached => 429,
+                    Refusal::InvalidContent(_) => 400,
+                };
                 let mut response = Response::from_json(&ErrorResponse::new(
-                    "Invalid or expired token",
-                    "UNAUTHORIZED",
+                    refusal.message(),
+                    if status == 401 { "UNAUTHORIZED" } else { "BAD_REQUEST" },
                 ))?
-                .with_status(401);
-                response.headers_mut().set("WWW-Authenticate", "Bearer")?;
+                .with_status(status);
+                if status == 401 {
+                    response.headers_mut().set("WWW-Authenticate", "Bearer")?;
+                }
                 return Ok(response);
             }
-            TokenStatus::DailyLimitReached => {
-                return Response::from_json(&ErrorResponse::bad_request(
-                    "Daily write limit reached",
-                ))
-                .map(|r| r.with_status(429));
-            }
         }
-    } else if let Some(response) =
-        reject_unless_turnstile_passes(&ctx, body.turnstile_token.as_deref(), &ip).await?
-    {
-        return Ok(response);
-    }
-
-    // CRLF を LF に正規化（Windows環境対応）
-    let content = body.content.replace('\r', "");
-
-    if content.trim().is_empty() {
-        return Response::from_json(&ErrorResponse::bad_request("Content must not be empty"))
-            .map(|r| r.with_status(400));
-    }
-
-    if content.chars().count() > MAX_CONTENT_LENGTH {
-        return Response::from_json(&ErrorResponse::bad_request(format!(
-            "Content too long. Maximum {} characters allowed.",
-            MAX_CONTENT_LENGTH
-        )))
-        .map(|r| r.with_status(400));
-    }
-
-    match db::upsert_today_entry(&db, &content).await {
-        Ok(()) => {
-            if let Err(e) = rate_limit::increment_rate_limit(&kv, &ip).await {
-                worker::console_error!("Failed to increment rate limit: {:?}", e);
-            }
-
-            let today = today_jst();
-            if let Some(token) = bearer {
-                if let Err(e) = agent_token::record_write(&kv, token, &today).await {
-                    worker::console_error!("Failed to record token write: {:?}", e);
-                }
-            }
-
-            let response = DiaryEntryResponse {
-                date: today,
-                content,
-                can_edit: true,
-            };
-            Response::from_json(&response).map(|r| r.with_status(201))
+    } else {
+        if let Some(response) =
+            reject_unless_turnstile_passes(&ctx, body.turnstile_token.as_deref(), &ip).await?
+        {
+            return Ok(response);
         }
-        Err(e) => {
+
+        let content = match agent_write::normalize_content(&body.content) {
+            Ok(content) => content,
+            Err(reason) => {
+                return Response::from_json(&ErrorResponse::bad_request(reason))
+                    .map(|r| r.with_status(400));
+            }
+        };
+
+        let db: D1Database = ctx.env.d1("DB")?;
+        if let Err(e) = db::upsert_today_entry(&db, &content).await {
             worker::console_error!("Failed to save entry: {:?}", e);
-            Response::from_json(&ErrorResponse::internal_error())
-                .map(|r| r.with_status(500))
+            return Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| r.with_status(500));
         }
+        content
+    };
+
+    if let Err(e) = rate_limit::increment_rate_limit(&kv, &ip).await {
+        worker::console_error!("Failed to increment rate limit: {:?}", e);
     }
+
+    Response::from_json(&DiaryEntryResponse {
+        date: today_jst(),
+        content,
+        can_edit: true,
+    })
+    .map(|r| r.with_status(201))
 }
 
 /// POST /api/today/image - 今日の画像をアップロード（multipart/form-data）

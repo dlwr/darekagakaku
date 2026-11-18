@@ -1,11 +1,13 @@
 use worker::*;
 
 mod agent_token;
+mod agent_write;
 mod agents;
 mod auth;
 mod db;
 mod handlers;
 mod image;
+mod jsonrpc;
 mod models;
 mod pages;
 mod rate_limit;
