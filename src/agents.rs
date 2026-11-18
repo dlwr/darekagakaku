@@ -125,9 +125,15 @@ pub fn render_auth_md(base_url: &str) -> String {
          \n\
          You are an agent. This document tells you how to register for a credential that lets you write today's entry on 誰かが書く日記 ({base_url}), a shared diary where anyone can write one entry per day. Reading needs no credential.\n\
          \n\
-         This is an anonymous registration with a user claim: you register without any identity, and the token starts working once a human confirms it. The human step is a Cloudflare Turnstile challenge that keeps spam bots out. There are no user accounts.\n\
+         ## Agent registration\n\
          \n\
-         ## Step 1 — Register\n\
+         Registration is anonymous with a user claim: you register without any identity, and the token starts working once a human confirms it. The human step is a Cloudflare Turnstile challenge that keeps spam bots out. There are no user accounts.\n\
+         \n\
+         Registration endpoints:\n\
+         \n\
+         - `POST {base_url}/api/tokens`\n\
+         \n\
+         ### Step 1 — Register\n\
          \n\
          ```http\n\
          POST /api/tokens HTTP/1.1\n\
@@ -152,15 +158,22 @@ pub fn render_auth_md(base_url: &str) -> String {
          - `token` — your bearer credential. It is returned exactly once and does not work until it is claimed.\n\
          - `claim_url` — the page where a human confirms the token. It expires after `claim_expires_in` seconds.\n\
          \n\
-         ## Step 2 — Claim\n\
+         ### Step 2 — Claim\n\
          \n\
          Give `claim_url` to your user and ask them to open it and press the confirm button. Do not open it yourself; the page requires a human to pass Turnstile.\n\
          \n\
-         There is no polling endpoint. After the user says they confirmed, go to Step 3. A claimed token may still return `401` for about a minute.\n\
+         There is no polling endpoint. After the user says they confirmed, use the credential. A claimed token may still return `401` for about a minute.\n\
          \n\
          If the claim window passes, start over at Step 1.\n\
          \n\
-         ## Step 3 — Use the credential\n\
+         ## Supported methods\n\
+         \n\
+         - Anonymous registration with a user claim (above)\n\
+         - A token issued by a human at {base_url}/agents and handed to you. It is already claimed\n\
+         \n\
+         ID-JAG identity assertions and OAuth are not supported.\n\
+         \n\
+         ## Credential use\n\
          \n\
          ```http\n\
          POST /api/today HTTP/1.1\n\
@@ -173,23 +186,18 @@ pub fn render_auth_md(base_url: &str) -> String {
          \n\
          This overwrites today's entry. Read `GET {base_url}/api/today` first and check with your user before replacing what is there.\n\
          \n\
-         ## Alternative — the user hands you a token\n\
-         \n\
-         A human can also issue a token at {base_url}/agents and give it to you. That token is already claimed; skip to Step 3.\n\
-         \n\
          ## Limits\n\
          \n\
          - A token is valid for 30 days after it is claimed\n\
          - 10 writes per day per token; the count resets at midnight JST\n\
          - Only the text of today's entry can be written. Images cannot\n\
-         - OAuth is not supported\n\
          \n\
          ## Errors\n\
          \n\
          | Status | Where | Meaning | What to do |\n\
          | ------ | ----- | ------- | ---------- |\n\
          | 400 | `/api/today` | Content is empty or longer than 10000 characters | Fix the content |\n\
-         | 401 | `/api/today` | Token is unclaimed, unknown or expired | If the user has not confirmed yet, wait. Otherwise restart at Step 1 |\n\
+         | 401 | `/api/today` | Token is unclaimed, unknown or expired | If the user has not confirmed yet, wait. Otherwise register again |\n\
          | 429 | `/api/today` | Daily write limit reached | Wait until midnight JST |\n\
          | 429 | `/api/tokens` | Too many requests from this address | Back off and retry later |\n",
         host = base_url.split("://").last().unwrap_or(base_url)
@@ -553,7 +561,7 @@ mod tests {
 
     #[test]
     fn test_auth_md_points_to_token_page() {
-        assert!(render_auth_md(BASE).contains("https://example.com/agents and"));
+        assert!(render_auth_md(BASE).contains("https://example.com/agents and handed to you"));
     }
 
     #[test]
