@@ -107,6 +107,11 @@ pub async fn agent_claim_page(_req: Request, ctx: RouteContext<()>) -> Result<Re
     Response::from_html(templates::render_agent_claim(&turnstile_site_key))
 }
 
+/// GET /.well-known/mcp/server-card.json
+pub async fn mcp_server_card(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    Response::from_json(&crate::mcp::server_card(&base_url(&req)?))
+}
+
 /// GET /sitemap.xml
 pub async fn sitemap(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;

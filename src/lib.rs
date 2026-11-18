@@ -8,6 +8,7 @@ mod db;
 mod handlers;
 mod image;
 mod jsonrpc;
+mod mcp;
 mod models;
 mod pages;
 mod rate_limit;
@@ -50,6 +51,9 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             "/.well-known/agent-skills/write-diary/SKILL.md",
             pages::write_skill_md,
         )
+        .get_async("/.well-known/mcp/server-card.json", pages::mcp_server_card)
+        .post_async("/mcp", mcp::post)
+        .get_async("/mcp", mcp::get)
         .get_async("/agents", pages::agents_page)
         .get_async("/agents/claim", pages::agent_claim_page)
         // OG画像
