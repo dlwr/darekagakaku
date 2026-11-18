@@ -76,6 +76,7 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 | `/.well-known/agent-skills/index.json` | GET | Agent Skillsの一覧 |
 | `/.well-known/agent-skills/write-diary/SKILL.md` | GET | 日記を書くスキル |
 | `/agents` | GET | エージェント用トークンの発行ページ |
+| `/agents/claim` | GET | エージェントが登録したトークンの承認ページ |
 | `/entries` | GET | 過去の日記一覧 |
 | `/entries/:date` | GET | 特定日の日記 |
 | `/admin/login` | GET/POST | 管理者ログイン（Cookie認証） |
@@ -84,7 +85,8 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 | `/admin/entries/:date/versions` | GET | 管理者用：バージョン一覧 |
 | `/admin/entries/:date/versions/:version` | GET | 管理者用：バージョン詳細 |
 | `/api/today` | GET/POST | 今日の日記API（POSTはTurnstileかエージェント用Bearerトークン） |
-| `/api/tokens` | POST | エージェント用トークンの発行（Turnstile必須） |
+| `/api/tokens` | POST | エージェント用トークンの発行（Turnstile付きなら即有効、無しなら承認待ち） |
+| `/api/tokens/claim` | POST | 承認待ちトークンの承認（Turnstile必須） |
 | `/api/entries` | GET | 一覧API |
 | `/api/entries/:date` | GET | 特定日API |
 | `/api/admin/entries/:date/versions` | GET | 管理者用：バージョン一覧API |
