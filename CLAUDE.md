@@ -55,6 +55,10 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 - [handlers.rs](src/handlers.rs) - JSON APIハンドラ
 - [templates.rs](src/templates.rs) - HTMLテンプレート生成（手書きHTML）
 - [agents.rs](src/agents.rs) - クローラ・エージェント向けテキスト生成（robots.txt、サイトマップ、Markdown、auth.md、スキル、APIカタログ）
+- [agent_write.rs](src/agent_write.rs) - 本文の検証と、トークンによる今日の日記の書き込み（REST・MCP・A2A共通）
+- [mcp.rs](src/mcp.rs) - MCPサーバー（read_today / read_entry / list_entries / write_today）
+- [a2a.rs](src/a2a.rs) - A2Aエンドポイントと Agent Card
+- [jsonrpc.rs](src/jsonrpc.rs) - JSON-RPC応答の組み立て
 - [agent_token.rs](src/agent_token.rs) - エージェント用書き込みトークン（KV `RATE_LIMIT` に保存、有効30日・1日10回）
 - [models.rs](src/models.rs) - データ構造とSerdeシリアライズ
 - [db.rs](src/db.rs) - D1データベース操作
@@ -75,6 +79,10 @@ Cloudflare Workers (Rust/WASM) + D1データベースで構成。`worker` crate�
 | `/.well-known/api-catalog` | GET | APIカタログ（RFC 9727） |
 | `/.well-known/agent-skills/index.json` | GET | Agent Skillsの一覧 |
 | `/.well-known/agent-skills/write-diary/SKILL.md` | GET | 日記を書くスキル |
+| `/.well-known/mcp/server-card.json` | GET | MCP Server Card |
+| `/.well-known/agent-card.json` | GET | A2A Agent Card |
+| `/mcp` | POST | MCPサーバー（Streamable HTTP、セッション無し） |
+| `/a2a` | POST | A2A（JSON-RPC、`SendMessage` のみ） |
 | `/agents` | GET | エージェント用トークンの発行ページ |
 | `/agents/claim` | GET | エージェントが登録したトークンの承認ページ |
 | `/entries` | GET | 過去の日記一覧 |

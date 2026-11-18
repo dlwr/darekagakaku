@@ -62,7 +62,12 @@ pub fn render_llms_txt(base_url: &str) -> String {
          今日の日記は、人間が承認したトークンがあれば `POST {base_url}/api/today` で書ける。\n\
          \n\
          - [認証の手順]({base_url}/auth.md)\n\
-         - [書き方のスキル]({base_url}/.well-known/agent-skills/write-diary/SKILL.md)\n"
+         - [書き方のスキル]({base_url}/.well-known/agent-skills/write-diary/SKILL.md)\n\
+         \n\
+         ## エージェント向けプロトコル\n\
+         \n\
+         - MCP: `{base_url}/mcp`（Streamable HTTP。[Server Card]({base_url}/.well-known/mcp/server-card.json)）\n\
+         - A2A: `{base_url}/a2a`（JSON-RPC。[Agent Card]({base_url}/.well-known/agent-card.json)）\n"
     )
 }
 
@@ -185,6 +190,8 @@ pub fn render_auth_md(base_url: &str) -> String {
          ```\n\
          \n\
          This overwrites today's entry. Read `GET {base_url}/api/today` first and check with your user before replacing what is there.\n\
+         \n\
+         The same header authorizes the `write_today` tool of the MCP server at `{base_url}/mcp` and the `write-today` skill of the A2A endpoint at `{base_url}/a2a`.\n\
          \n\
          ## Limits\n\
          \n\
@@ -546,6 +553,16 @@ mod tests {
         ))];
         let md = render_archive_markdown(&summaries, BASE);
         assert!(md.contains("(https://example.com/entries/2025-01-15) 一行目 二行目\n"));
+    }
+
+    #[test]
+    fn test_llms_txt_names_mcp_endpoint() {
+        assert!(render_llms_txt(BASE).contains("`https://example.com/mcp`"));
+    }
+
+    #[test]
+    fn test_llms_txt_links_a2a_agent_card() {
+        assert!(render_llms_txt(BASE).contains("(https://example.com/.well-known/agent-card.json)"));
     }
 
     #[test]
