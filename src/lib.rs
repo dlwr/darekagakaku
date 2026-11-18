@@ -48,6 +48,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             "/.well-known/agent-skills/write-diary/SKILL.md",
             pages::write_skill_md,
         )
+        .get_async("/agents", pages::agents_page)
         // OG画像
         .get_async("/og/:filename", pages::og_image)
         // 画像配信

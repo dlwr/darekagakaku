@@ -87,6 +87,16 @@ pub async fn openapi(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
     Response::from_json(&agents::render_openapi(&base_url(&req)?))
 }
 
+/// GET /agents - エージェント用トークンの発行ページ
+pub async fn agents_page(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let turnstile_site_key = ctx
+        .env
+        .var("TURNSTILE_SITE_KEY")
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    Response::from_html(templates::render_agents(&turnstile_site_key))
+}
+
 /// GET /sitemap.xml
 pub async fn sitemap(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;

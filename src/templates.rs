@@ -740,7 +740,7 @@ pub fn render_about() -> String {
         <p>たとえそれがどんなに汚ない言葉でも例外はありません。</p>
         <p>日付を越えるという経験をした言葉は（スーパーユーザではない限り）2度と手をいれることのできない存在になります。</p>
     </div>
-    <p style="text-align: right; margin-top: 20px;"><a href="/">トップ</a></p>
+    <p style="text-align: right; margin-top: 20px;"><a href="/agents">エージェントに書かせる</a> ・ <a href="/">トップ</a></p>
 {footer}"#,
         head = html_head(
             "これはなにか",
@@ -749,6 +749,82 @@ pub fn render_about() -> String {
             Some("https://darekagakaku.day/og/default.png"),
         ),
         nav = html_nav(),
+        footer = html_footer()
+    )
+}
+
+pub fn render_agents(turnstile_site_key: &str) -> String {
+    format!(
+        r#"{head}
+    {nav}
+    <h1>エージェントに書かせる</h1>
+    <div class="content">
+        <p>トークンを発行してエージェントに渡すと、そのエージェントが今日の日記を書けるようになります。</p>
+        <p>トークンは発行から30日間有効で、1日に10回まで書けます。再表示はできないので、発行したらその場で控えてください。</p>
+        <p>エージェント向けの説明は <a href="/auth.md">auth.md</a> と <a href="/llms.txt">llms.txt</a> にあります。</p>
+    </div>
+    <div id="turnstile-container"></div>
+    <button type="button" id="issue-token-btn">トークンを発行する</button>
+    <div id="token-result" hidden>
+        <p class="hint">トークン</p>
+        <pre class="content" id="token-value"></pre>
+        <p class="hint">エージェントに渡す文面の例</p>
+        <pre class="content" id="token-prompt"></pre>
+    </div>
+    <script>
+    var turnstileWidgetId = null;
+    function initTurnstile() {{
+        if (typeof turnstile !== 'undefined') {{
+            turnstileWidgetId = turnstile.render('#turnstile-container', {{
+                sitekey: '{turnstile_key}'
+            }});
+        }}
+    }}
+    document.getElementById('issue-token-btn').addEventListener('click', function() {{
+        var btn = this;
+        var token = turnstileWidgetId ? turnstile.getResponse(turnstileWidgetId) : null;
+        if (!token) {{
+            alert('認証処理中です。少々お待ちください。');
+            return;
+        }}
+        btn.disabled = true;
+        fetch('/api/tokens', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ turnstile_token: token }})
+        }}).then(function(res) {{
+            if (res.status === 429) {{
+                alert('発行制限中です。しばらくお待ちください。');
+                return;
+            }}
+            if (!res.ok) {{
+                alert('発行に失敗しました');
+                return;
+            }}
+            return res.json().then(function(data) {{
+                document.getElementById('token-value').textContent = data.token;
+                document.getElementById('token-prompt').textContent =
+                    location.origin + '/auth.md を読んで、次のトークンで今日の日記を書いて。\n' + data.token;
+                document.getElementById('token-result').hidden = false;
+            }});
+        }}).catch(function() {{
+            alert('発行に失敗しました');
+        }}).finally(function() {{
+            btn.disabled = false;
+            turnstile.reset(turnstileWidgetId);
+        }});
+    }});
+    </script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=initTurnstile" async defer></script>
+{footer}"#,
+        head = html_head(
+            "エージェントに書かせる",
+            Some("エージェントが今日の日記を書くためのトークンを発行する"),
+            "/agents",
+            None,
+        ),
+        nav = html_nav(),
+        turnstile_key = escape_html(turnstile_site_key),
         footer = html_footer()
     )
 }
@@ -989,6 +1065,26 @@ pub fn render_admin_login(error: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_render_agents_has_issue_button() {
+        assert!(render_agents("key").contains(r#"<button type="button" id="issue-token-btn">"#));
+    }
+
+    #[test]
+    fn test_render_agents_embeds_turnstile_site_key() {
+        assert!(render_agents("my-site-key").contains("sitekey: 'my-site-key'"));
+    }
+
+    #[test]
+    fn test_render_agents_links_auth_md() {
+        assert!(render_agents("key").contains(r#"href="/auth.md""#));
+    }
+
+    #[test]
+    fn test_render_about_links_agents_page() {
+        assert!(render_about().contains(r#"href="/agents""#));
+    }
 
     #[test]
     fn test_render_archive_uses_square_grid() {
