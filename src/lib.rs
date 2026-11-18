@@ -1,5 +1,6 @@
 use worker::*;
 
+mod agents;
 mod auth;
 mod db;
 mod handlers;
