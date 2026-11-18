@@ -5,6 +5,7 @@ use worker::Result;
 
 pub const TOKEN_TTL_SECONDS: u64 = 30 * 24 * 60 * 60;
 pub const DAILY_WRITE_LIMIT: u32 = 10;
+pub const CLAIM_TTL_SECONDS: u64 = 60 * 60;
 const COUNT_TTL_SECONDS: u64 = 2 * 24 * 60 * 60;
 
 #[wasm_bindgen]
@@ -38,6 +39,10 @@ fn token_key(token: &str) -> String {
     format!("token:{}", token_hash(token))
 }
 
+fn claim_key(code: &str) -> String {
+    format!("claim:{}", token_hash(code))
+}
+
 fn count_key(token: &str, date: &str) -> String {
     format!("token_writes:{}:{}", token_hash(token), date)
 }
@@ -51,13 +56,45 @@ async fn write_count(kv: &KvStore, token: &str, date: &str) -> Result<u32> {
         .unwrap_or(0))
 }
 
-pub async fn issue(kv: &KvStore) -> Result<String> {
-    let token = format!("dk_{}", random_uuid().replace('-', ""));
-    kv.put(&token_key(&token), "1")?
+fn new_secret() -> String {
+    random_uuid().replace('-', "")
+}
+
+async fn enable(kv: &KvStore, token_key: &str) -> Result<()> {
+    kv.put(token_key, "1")?
         .expiration_ttl(TOKEN_TTL_SECONDS)
         .execute()
-        .await?;
+        .await
+        .map_err(Into::into)
+}
+
+/// すぐ使えるトークンを発行する（人間がTurnstileを通過済みのとき）
+pub async fn issue(kv: &KvStore) -> Result<String> {
+    let token = format!("dk_{}", new_secret());
+    enable(kv, &token_key(&token)).await?;
     Ok(token)
+}
+
+/// 人間が承認するまで使えないトークンと、承認用のコードを発行する
+pub async fn register_unclaimed(kv: &KvStore) -> Result<(String, String)> {
+    let token = format!("dk_{}", new_secret());
+    let claim_code = new_secret();
+    kv.put(&claim_key(&claim_code), token_key(&token))?
+        .expiration_ttl(CLAIM_TTL_SECONDS)
+        .execute()
+        .await?;
+    Ok((token, claim_code))
+}
+
+/// 承認コードに対応するトークンを使えるようにする。コードが無効・期限切れなら false
+pub async fn claim(kv: &KvStore, claim_code: &str) -> Result<bool> {
+    let key = claim_key(claim_code);
+    let Some(token_key) = kv.get(&key).text().await? else {
+        return Ok(false);
+    };
+    enable(kv, &token_key).await?;
+    kv.delete(&key).await?;
+    Ok(true)
 }
 
 pub async fn status(kv: &KvStore, token: &str, date: &str) -> Result<TokenStatus> {
@@ -151,5 +188,20 @@ mod tests {
     #[test]
     fn test_count_key_does_not_contain_raw_token() {
         assert!(!count_key("dk_secret", "2025-01-15").contains("dk_secret"));
+    }
+
+    #[test]
+    fn test_claim_key_does_not_contain_raw_code() {
+        assert!(!claim_key("secret-code").contains("secret-code"));
+    }
+
+    #[test]
+    fn test_claim_key_is_per_code() {
+        assert_ne!(claim_key("a"), claim_key("b"));
+    }
+
+    #[test]
+    fn test_claim_key_differs_from_token_key_for_same_value() {
+        assert_ne!(claim_key("abc"), token_key("abc"));
     }
 }

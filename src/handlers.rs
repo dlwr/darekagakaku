@@ -80,6 +80,9 @@ struct PostTokenRequest {
 }
 
 /// POST /api/tokens - エージェント用の書き込みトークンを発行
+///
+/// `turnstile_token` があれば人間による発行としてすぐ使えるトークンを返す。
+/// 無ければエージェントによる登録として、人間の承認待ちのトークンと承認URLを返す。
 pub async fn post_token(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let kv = ctx.env.kv("RATE_LIMIT")?;
     let ip = rate_limit::get_client_ip(&req);
@@ -97,23 +100,82 @@ pub async fn post_token(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
         }
     };
 
+    let mut response = serde_json::json!({
+        "expires_in": agent_token::TOKEN_TTL_SECONDS,
+        "daily_write_limit": agent_token::DAILY_WRITE_LIMIT,
+    });
+
+    if body.turnstile_token.is_some() {
+        if let Some(response) =
+            reject_unless_turnstile_passes(&ctx, body.turnstile_token.as_deref(), &ip).await?
+        {
+            return Ok(response);
+        }
+        response["token"] = agent_token::issue(&kv).await?.into();
+    } else {
+        let (token, claim_code) = agent_token::register_unclaimed(&kv).await?;
+        let url = req.url()?;
+        response["token"] = token.into();
+        response["claim_url"] = format!(
+            "{}://{}/agents/claim?code={}",
+            url.scheme(),
+            url.host_str().unwrap_or("localhost"),
+            claim_code
+        )
+        .into();
+        response["claim_expires_in"] = agent_token::CLAIM_TTL_SECONDS.into();
+    }
+
+    if let Err(e) = rate_limit::increment_rate_limit(&kv, &ip).await {
+        worker::console_error!("Failed to increment rate limit: {:?}", e);
+    }
+
+    Response::from_json(&response).map(|r| r.with_status(201))
+}
+
+#[derive(Deserialize)]
+struct ClaimTokenRequest {
+    claim_code: Option<String>,
+    turnstile_token: Option<String>,
+}
+
+/// POST /api/tokens/claim - エージェントが登録したトークンを人間が承認する
+pub async fn post_token_claim(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let kv = ctx.env.kv("RATE_LIMIT")?;
+    let ip = rate_limit::get_client_ip(&req);
+
+    if rate_limit::check_rate_limit(&kv, &ip).await? {
+        return Response::from_json(&ErrorResponse::bad_request("Too Many Requests"))
+            .map(|r| r.with_status(429));
+    }
+
+    let body: ClaimTokenRequest = match req.json().await {
+        Ok(body) => body,
+        Err(_) => {
+            return Response::from_json(&ErrorResponse::bad_request("Invalid JSON"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
     if let Some(response) =
         reject_unless_turnstile_passes(&ctx, body.turnstile_token.as_deref(), &ip).await?
     {
         return Ok(response);
     }
 
-    let token = agent_token::issue(&kv).await?;
     if let Err(e) = rate_limit::increment_rate_limit(&kv, &ip).await {
         worker::console_error!("Failed to increment rate limit: {:?}", e);
     }
 
-    Response::from_json(&serde_json::json!({
-        "token": token,
-        "expires_in": agent_token::TOKEN_TTL_SECONDS,
-        "daily_write_limit": agent_token::DAILY_WRITE_LIMIT,
-    }))
-    .map(|r| r.with_status(201))
+    let claimed = match body.claim_code.as_deref() {
+        Some(code) => agent_token::claim(&kv, code).await?,
+        None => false,
+    };
+    if !claimed {
+        return Response::from_json(&ErrorResponse::not_found()).map(|r| r.with_status(404));
+    }
+
+    Response::from_json(&serde_json::json!({ "status": "claimed" }))
 }
 
 /// POST /api/today - 今日の日記を作成/更新

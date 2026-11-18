@@ -57,6 +57,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/api/today", handlers::get_today)
         .post_async("/api/today", handlers::post_today)
         .post_async("/api/tokens", handlers::post_token)
+        .post_async("/api/tokens/claim", handlers::post_token_claim)
         .post_async("/api/today/image", handlers::post_today_image)
         .delete_async("/api/today/image", handlers::delete_today_image)
         .get_async("/api/entries", handlers::get_entries)
