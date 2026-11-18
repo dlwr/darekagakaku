@@ -40,6 +40,14 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/robots.txt", pages::robots_txt)
         .get_async("/sitemap.xml", pages::sitemap)
         .get_async("/llms.txt", pages::llms_txt)
+        .get_async("/auth.md", pages::auth_md)
+        .get_async("/openapi.json", pages::openapi)
+        .get_async("/.well-known/api-catalog", pages::api_catalog)
+        .get_async("/.well-known/agent-skills/index.json", pages::skills_index)
+        .get_async(
+            "/.well-known/agent-skills/write-diary/SKILL.md",
+            pages::write_skill_md,
+        )
         // OG画像
         .get_async("/og/:filename", pages::og_image)
         // 画像配信

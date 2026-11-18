@@ -53,6 +53,40 @@ pub async fn llms_txt(req: Request, _ctx: RouteContext<()>) -> Result<Response> 
     )
 }
 
+/// GET /auth.md
+pub async fn auth_md(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    text_response(
+        agents::render_auth_md(&base_url(&req)?),
+        "text/markdown; charset=utf-8",
+    )
+}
+
+/// GET /.well-known/agent-skills/index.json
+pub async fn skills_index(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    Response::from_json(&agents::render_skills_index(&base_url(&req)?))
+}
+
+/// GET /.well-known/agent-skills/write-diary/SKILL.md
+pub async fn write_skill_md(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    text_response(
+        agents::render_write_skill_md(&base_url(&req)?),
+        "text/markdown; charset=utf-8",
+    )
+}
+
+/// GET /.well-known/api-catalog
+pub async fn api_catalog(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    text_response(
+        agents::render_api_catalog(&base_url(&req)?).to_string(),
+        "application/linkset+json",
+    )
+}
+
+/// GET /openapi.json
+pub async fn openapi(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    Response::from_json(&agents::render_openapi(&base_url(&req)?))
+}
+
 /// GET /sitemap.xml
 pub async fn sitemap(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;
@@ -148,7 +182,7 @@ pub async fn home(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     )?;
     res.headers_mut().set(
         "Link",
-        r#"</llms.txt>; rel="describedby", </feed>; rel="alternate"; type="application/rss+xml""#,
+        r#"</.well-known/api-catalog>; rel="api-catalog", </llms.txt>; rel="describedby", </feed>; rel="alternate"; type="application/rss+xml""#,
     )?;
     Ok(res)
 }

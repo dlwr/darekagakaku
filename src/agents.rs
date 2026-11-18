@@ -1,3 +1,6 @@
+use serde_json::json;
+use sha2::{Digest, Sha256};
+
 use crate::models::{DiaryEntry, DiaryEntrySummary};
 
 pub fn wants_markdown(accept: Option<&str>) -> bool {
@@ -51,7 +54,15 @@ pub fn render_llms_txt(base_url: &str) -> String {
          \n\
          - [今日の日記]({base_url}/api/today)\n\
          - [過去の日記一覧]({base_url}/api/entries)\n\
-         - 特定日の日記: `{base_url}/api/entries/YYYY-MM-DD`\n"
+         - 特定日の日記: `{base_url}/api/entries/YYYY-MM-DD`\n\
+         - [OpenAPI]({base_url}/openapi.json)\n\
+         \n\
+         ## 書く\n\
+         \n\
+         今日の日記は、人間が発行したトークンがあれば `POST {base_url}/api/today` で書ける。\n\
+         \n\
+         - [認証の手順]({base_url}/auth.md)\n\
+         - [書き方のスキル]({base_url}/.well-known/agent-skills/write-diary/SKILL.md)\n"
     )
 }
 
@@ -106,6 +117,209 @@ pub fn render_archive_markdown(entries: &[DiaryEntrySummary], base_url: &str) ->
         .collect();
 
     format!("# 過去の日記\n\n{items}")
+}
+
+pub fn render_auth_md(base_url: &str) -> String {
+    format!(
+        "# 誰かが書く日記 auth.md\n\
+         \n\
+         人間の代わりに今日の日記を書くエージェント向けの認証手順。読むだけなら認証は要らない。\n\
+         \n\
+         ## 対象\n\
+         \n\
+         人間から書き込みトークンを預かったエージェント。エージェントが自分でトークンを取得する方法は無い。\n\
+         \n\
+         ## トークンの発行\n\
+         \n\
+         人間がブラウザで {base_url}/agents を開き、Turnstile を通過して発行する。\n\
+         発行APIは `POST {base_url}/api/tokens` だが、Turnstile のトークンが必須なので人間の操作が要る。\n\
+         \n\
+         ## 対応している方式\n\
+         \n\
+         - Bearer トークン（人間が発行して渡す）\n\
+         \n\
+         OAuth には対応していない。\n\
+         \n\
+         ## トークンの使い方\n\
+         \n\
+         ```\n\
+         POST {base_url}/api/today\n\
+         Authorization: Bearer dk_...\n\
+         Content-Type: application/json\n\
+         \n\
+         {{\"content\": \"今日の日記の本文\"}}\n\
+         ```\n\
+         \n\
+         ## 制限\n\
+         \n\
+         - 有効期間は発行から30日\n\
+         - 書き込みは1トークンにつき1日10回まで（日本時間で日付が変わると戻る）\n\
+         - 書けるのは今日の日記の本文だけ。画像は扱えない\n\
+         - 発行直後の1分ほどは `401` が返ることがある\n\
+         - トークンが無効なら `401`、回数の上限なら `429` を返す\n"
+    )
+}
+
+pub fn render_write_skill_md(base_url: &str) -> String {
+    format!(
+        "---\n\
+         name: write-diary\n\
+         description: 「誰かが書く日記」の今日の日記を読み書きする。ユーザーから日記を書いてほしいと頼まれ、書き込みトークンを預かっているときに使う。\n\
+         ---\n\
+         \n\
+         # 今日の日記を書く\n\
+         \n\
+         「誰かが書く日記」は1日に1つの日記を誰でも書ける共有日記。書くと前の内容は上書きされ、日本時間で日付が変わると編集できなくなる。\n\
+         \n\
+         ## 読む\n\
+         \n\
+         ```\n\
+         GET {base_url}/api/today\n\
+         ```\n\
+         \n\
+         `content` が今の本文。まだ誰も書いていなければ `null`。上書きする前に読んで、ユーザーが前の内容を残したいか確かめる。\n\
+         \n\
+         ## 書く\n\
+         \n\
+         ```\n\
+         POST {base_url}/api/today\n\
+         Authorization: Bearer <トークン>\n\
+         Content-Type: application/json\n\
+         \n\
+         {{\"content\": \"本文\"}}\n\
+         ```\n\
+         \n\
+         - 本文は10000文字まで。空は不可\n\
+         - 成功すると `201` と保存後の内容が返る\n\
+         - `401` はトークンが無効か期限切れ。ユーザーに {base_url}/agents で発行し直してもらう\n\
+         - `429` は1日10回の上限。翌日まで待つ\n\
+         \n\
+         トークンの発行方法と制限は {base_url}/auth.md にある。\n"
+    )
+}
+
+pub fn render_skills_index(base_url: &str) -> serde_json::Value {
+    let digest = Sha256::digest(render_write_skill_md(base_url).as_bytes());
+
+    json!({
+        "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+        "skills": [{
+            "name": "write-diary",
+            "type": "skill-md",
+            "description": "「誰かが書く日記」の今日の日記を読み書きする",
+            "url": format!("{base_url}/.well-known/agent-skills/write-diary/SKILL.md"),
+            "digest": format!("sha256:{digest:x}"),
+        }]
+    })
+}
+
+pub fn render_api_catalog(base_url: &str) -> serde_json::Value {
+    json!({
+        "linkset": [{
+            "anchor": format!("{base_url}/api"),
+            "service-desc": [{
+                "href": format!("{base_url}/openapi.json"),
+                "type": "application/openapi+json",
+            }],
+            "service-doc": [{
+                "href": format!("{base_url}/llms.txt"),
+                "type": "text/plain",
+            }],
+        }]
+    })
+}
+
+pub fn render_openapi(base_url: &str) -> serde_json::Value {
+    let entry = json!({
+        "type": "object",
+        "properties": {
+            "date": { "type": "string", "format": "date" },
+            "content": { "type": ["string", "null"] },
+            "can_edit": { "type": "boolean" },
+        },
+    });
+    let entry_response = json!({
+        "description": "日記",
+        "content": { "application/json": { "schema": entry } },
+    });
+
+    json!({
+        "openapi": "3.1.0",
+        "info": {
+            "title": "誰かが書く日記",
+            "version": "1.0.0",
+            "description": "1日に1つの日記を誰でも書ける共有日記。日本時間で日付が変わると編集できなくなる。",
+        },
+        "servers": [{ "url": base_url }],
+        "paths": {
+            "/api/today": {
+                "get": {
+                    "summary": "今日の日記を取得",
+                    "responses": { "200": entry_response },
+                },
+                "post": {
+                    "summary": "今日の日記を上書き",
+                    "description": format!("トークンの発行方法は {base_url}/auth.md を参照。"),
+                    "security": [{ "agentToken": [] }],
+                    "requestBody": {
+                        "required": true,
+                        "content": { "application/json": { "schema": {
+                            "type": "object",
+                            "required": ["content"],
+                            "properties": {
+                                "content": { "type": "string", "minLength": 1, "maxLength": 10000 },
+                            },
+                        } } },
+                    },
+                    "responses": {
+                        "201": entry_response,
+                        "400": { "description": "本文が空か長すぎる" },
+                        "401": { "description": "トークンが無効か期限切れ" },
+                        "429": { "description": "書き込み回数の上限" },
+                    },
+                },
+            },
+            "/api/entries": {
+                "get": {
+                    "summary": "過去の日記一覧（新しい順）",
+                    "responses": { "200": {
+                        "description": "日記の一覧",
+                        "content": { "application/json": { "schema": {
+                            "type": "object",
+                            "properties": { "entries": { "type": "array", "items": {
+                                "type": "object",
+                                "properties": {
+                                    "date": { "type": "string", "format": "date" },
+                                    "preview": { "type": "string" },
+                                    "has_image": { "type": "boolean" },
+                                },
+                            } } },
+                        } } },
+                    } },
+                },
+            },
+            "/api/entries/{date}": {
+                "get": {
+                    "summary": "特定日の日記を取得",
+                    "parameters": [{
+                        "name": "date",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "string", "format": "date" },
+                    }],
+                    "responses": {
+                        "200": entry_response,
+                        "404": { "description": "その日の日記は無い" },
+                    },
+                },
+            },
+        },
+        "components": {
+            "securitySchemes": {
+                "agentToken": { "type": "http", "scheme": "bearer" },
+            },
+        },
+    })
 }
 
 #[cfg(test)]
@@ -288,5 +502,127 @@ mod tests {
         ))];
         let md = render_archive_markdown(&summaries, BASE);
         assert!(md.contains("(https://example.com/entries/2025-01-15) 一行目 二行目\n"));
+    }
+
+    #[test]
+    fn test_llms_txt_links_auth_md() {
+        assert!(render_llms_txt(BASE).contains("(https://example.com/auth.md)"));
+    }
+
+    #[test]
+    fn test_auth_md_heading_contains_auth_md() {
+        let first_line = render_auth_md(BASE).lines().next().unwrap().to_string();
+        assert!(first_line.starts_with("# ") && first_line.contains("auth.md"));
+    }
+
+    #[test]
+    fn test_auth_md_points_to_token_page() {
+        assert!(render_auth_md(BASE).contains("https://example.com/agents"));
+    }
+
+    #[test]
+    fn test_auth_md_explains_bearer_header() {
+        assert!(render_auth_md(BASE).contains("Authorization: Bearer"));
+    }
+
+    #[test]
+    fn test_auth_md_states_daily_limit() {
+        assert!(render_auth_md(BASE).contains("1日10回"));
+    }
+
+    #[test]
+    fn test_auth_md_states_token_lifetime() {
+        assert!(render_auth_md(BASE).contains("30日"));
+    }
+
+    #[test]
+    fn test_write_skill_md_has_frontmatter_name() {
+        assert!(render_write_skill_md(BASE).starts_with("---\nname: write-diary\n"));
+    }
+
+    #[test]
+    fn test_write_skill_md_shows_write_endpoint() {
+        assert!(render_write_skill_md(BASE).contains("https://example.com/api/today"));
+    }
+
+    #[test]
+    fn test_skills_index_declares_schema() {
+        assert_eq!(
+            render_skills_index(BASE)["$schema"],
+            "https://schemas.agentskills.io/discovery/0.2.0/schema.json"
+        );
+    }
+
+    #[test]
+    fn test_skills_index_names_skill() {
+        assert_eq!(render_skills_index(BASE)["skills"][0]["name"], "write-diary");
+    }
+
+    #[test]
+    fn test_skills_index_type_is_skill_md() {
+        assert_eq!(render_skills_index(BASE)["skills"][0]["type"], "skill-md");
+    }
+
+    #[test]
+    fn test_skills_index_url_points_to_skill_md() {
+        assert_eq!(
+            render_skills_index(BASE)["skills"][0]["url"],
+            "https://example.com/.well-known/agent-skills/write-diary/SKILL.md"
+        );
+    }
+
+    #[test]
+    fn test_skills_index_digest_matches_skill_md() {
+        use sha2::{Digest, Sha256};
+        let expected = format!(
+            "sha256:{:x}",
+            Sha256::digest(render_write_skill_md(BASE).as_bytes())
+        );
+        assert_eq!(render_skills_index(BASE)["skills"][0]["digest"], expected);
+    }
+
+    #[test]
+    fn test_api_catalog_anchor_is_api_root() {
+        assert_eq!(
+            render_api_catalog(BASE)["linkset"][0]["anchor"],
+            "https://example.com/api"
+        );
+    }
+
+    #[test]
+    fn test_api_catalog_service_desc_is_openapi() {
+        assert_eq!(
+            render_api_catalog(BASE)["linkset"][0]["service-desc"][0]["href"],
+            "https://example.com/openapi.json"
+        );
+    }
+
+    #[test]
+    fn test_api_catalog_service_doc_is_llms_txt() {
+        assert_eq!(
+            render_api_catalog(BASE)["linkset"][0]["service-doc"][0]["href"],
+            "https://example.com/llms.txt"
+        );
+    }
+
+    #[test]
+    fn test_openapi_server_is_base_url() {
+        assert_eq!(render_openapi(BASE)["servers"][0]["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_openapi_post_today_requires_bearer() {
+        assert_eq!(
+            render_openapi(BASE)["paths"]["/api/today"]["post"]["security"][0]["agentToken"],
+            serde_json::json!([])
+        );
+    }
+
+    #[test]
+    fn test_openapi_describes_each_read_endpoint() {
+        let spec = render_openapi(BASE);
+        for path in ["/api/today", "/api/entries", "/api/entries/{date}"] {
+            assert!(spec["paths"][path]["get"].is_object(), "missing GET {path}");
+        }
     }
 }
