@@ -11,7 +11,7 @@ const COUNT_TTL_SECONDS: u64 = 2 * 24 * 60 * 60;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = crypto, js_name = randomUUID)]
-    fn random_uuid() -> String;
+    pub fn random_uuid() -> String;
 }
 
 #[derive(Debug, PartialEq)]

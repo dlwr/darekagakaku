@@ -112,6 +112,11 @@ pub async fn mcp_server_card(req: Request, _ctx: RouteContext<()>) -> Result<Res
     Response::from_json(&crate::mcp::server_card(&base_url(&req)?))
 }
 
+/// GET /.well-known/agent-card.json
+pub async fn a2a_agent_card(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    Response::from_json(&crate::a2a::agent_card(&base_url(&req)?))
+}
+
 /// GET /sitemap.xml
 pub async fn sitemap(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;

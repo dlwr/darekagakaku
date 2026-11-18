@@ -1,5 +1,6 @@
 use worker::*;
 
+mod a2a;
 mod agent_token;
 mod agent_write;
 mod agents;
@@ -52,8 +53,10 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             pages::write_skill_md,
         )
         .get_async("/.well-known/mcp/server-card.json", pages::mcp_server_card)
+        .get_async("/.well-known/agent-card.json", pages::a2a_agent_card)
         .post_async("/mcp", mcp::post)
         .get_async("/mcp", mcp::get)
+        .post_async("/a2a", a2a::post)
         .get_async("/agents", pages::agents_page)
         .get_async("/agents/claim", pages::agent_claim_page)
         // OG画像
