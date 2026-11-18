@@ -1,11 +1,76 @@
 use worker::d1::D1Database;
 use worker::{Headers, Request, Response, Result, RouteContext};
 
+use crate::agents;
 use crate::auth;
 use crate::db;
 use crate::models::{DiaryEntrySummary, VersionSummary};
 use crate::templates;
 use crate::time::{is_today, is_valid_date, today_jst};
+
+fn base_url(req: &Request) -> Result<String> {
+    let url = req.url()?;
+    Ok(format!(
+        "{}://{}",
+        url.scheme(),
+        url.host_str().unwrap_or("localhost")
+    ))
+}
+
+fn wants_markdown(req: &Request) -> Result<bool> {
+    Ok(agents::wants_markdown(req.headers().get("Accept")?.as_deref()))
+}
+
+fn text_response(body: String, content_type: &str) -> Result<Response> {
+    let headers = Headers::new();
+    headers.set("Content-Type", content_type)?;
+    Ok(Response::ok(body)?.with_headers(headers))
+}
+
+/// Acceptヘッダで表現が変わるページ用。HTMLとMarkdownのどちらにも Vary を付ける。
+fn negotiated_response(html: impl FnOnce() -> String, markdown: Option<String>) -> Result<Response> {
+    let mut res = match markdown {
+        Some(md) => text_response(md, "text/markdown; charset=utf-8")?,
+        None => Response::from_html(html())?,
+    };
+    res.headers_mut().set("Vary", "Accept")?;
+    Ok(res)
+}
+
+/// GET /robots.txt
+pub async fn robots_txt(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    text_response(
+        agents::render_robots_txt(&base_url(&req)?),
+        "text/plain; charset=utf-8",
+    )
+}
+
+/// GET /llms.txt
+pub async fn llms_txt(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    text_response(
+        agents::render_llms_txt(&base_url(&req)?),
+        "text/plain; charset=utf-8",
+    )
+}
+
+/// GET /sitemap.xml
+pub async fn sitemap(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let db: D1Database = ctx.env.d1("DB")?;
+
+    // 50000 はサイトマップ1ファイルあたりのURL数上限
+    let entries = match db::list_past_entries(&db, 50000).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            worker::console_error!("Failed to list entries for sitemap: {:?}", e);
+            vec![]
+        }
+    };
+
+    text_response(
+        agents::render_sitemap(&entries, &base_url(&req)?),
+        "application/xml; charset=utf-8",
+    )
+}
 
 /// GET /og/:filename - OG画像をService Binding経由で転送
 ///
@@ -50,7 +115,7 @@ pub async fn about(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
 }
 
 /// GET / - ホームページ（今日の日記フォーム）
-pub async fn home(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn home(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;
     let today = today_jst();
 
@@ -68,12 +133,28 @@ pub async fn home(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
         .map(|v| v.to_string())
         .unwrap_or_default();
 
-    let html = templates::render_home(entry.as_ref(), &turnstile_site_key);
-    Response::from_html(html)
+    let markdown = if wants_markdown(&req)? {
+        Some(agents::render_home_markdown(
+            entry.as_ref(),
+            &today,
+            &base_url(&req)?,
+        ))
+    } else {
+        None
+    };
+    let mut res = negotiated_response(
+        || templates::render_home(entry.as_ref(), &turnstile_site_key),
+        markdown,
+    )?;
+    res.headers_mut().set(
+        "Link",
+        r#"</llms.txt>; rel="describedby", </feed>; rel="alternate"; type="application/rss+xml""#,
+    )?;
+    Ok(res)
 }
 
 /// GET /entries - 過去の日記一覧
-pub async fn entries_list(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn entries_list(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;
 
     let entries = match db::list_past_entries(&db, 100).await {
@@ -89,12 +170,16 @@ pub async fn entries_list(_req: Request, ctx: RouteContext<()>) -> Result<Respon
         .map(DiaryEntrySummary::from_entry)
         .collect();
 
-    let html = templates::render_archive(&summaries);
-    Response::from_html(html)
+    let markdown = if wants_markdown(&req)? {
+        Some(agents::render_archive_markdown(&summaries, &base_url(&req)?))
+    } else {
+        None
+    };
+    negotiated_response(|| templates::render_archive(&summaries), markdown)
 }
 
 /// GET /entries/:date - 特定日の日記を表示
-pub async fn entry_page(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn entry_page(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;
 
     let date = match ctx.param("date") {
@@ -118,9 +203,15 @@ pub async fn entry_page(_req: Request, ctx: RouteContext<()>) -> Result<Response
             Response::from_html(html).map(|r| r.with_status(404))
         }
         Ok(Some(entry)) => {
-            let can_edit = is_today(date);
-            let html = templates::render_entry(&entry, can_edit);
-            Response::from_html(html)
+            let markdown = if wants_markdown(&req)? {
+                Some(agents::render_entry_markdown(&entry, &base_url(&req)?))
+            } else {
+                None
+            };
+            negotiated_response(
+                || templates::render_entry(&entry, is_today(date)),
+                markdown,
+            )
         }
         Ok(None) => {
             let html = templates::render_not_found();
@@ -147,11 +238,7 @@ pub async fn feed(req: Request, ctx: RouteContext<()>) -> Result<Response> {
         }
     };
 
-    // ベースURLをリクエストから取得
-    let url = req.url()?;
-    let base_url = format!("{}://{}", url.scheme(), url.host_str().unwrap_or("localhost"));
-
-    let rss = templates::render_rss(&entries, &base_url);
+    let rss = templates::render_rss(&entries, &base_url(&req)?);
 
     let headers = Headers::new();
     headers.set("Content-Type", "application/rss+xml; charset=utf-8")?;

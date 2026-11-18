@@ -35,6 +35,10 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/feed", pages::feed)
         .get_async("/entries", pages::entries_list)
         .get_async("/entries/:date", pages::entry_page)
+        // クローラ・エージェント向け
+        .get_async("/robots.txt", pages::robots_txt)
+        .get_async("/sitemap.xml", pages::sitemap)
+        .get_async("/llms.txt", pages::llms_txt)
         // OG画像
         .get_async("/og/:filename", pages::og_image)
         // 画像配信
