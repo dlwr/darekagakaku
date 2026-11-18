@@ -2,6 +2,7 @@ use serde::Deserialize;
 use worker::d1::D1Database;
 use worker::{Headers, Request, Response, Result, RouteContext};
 
+use crate::agent_token::{self, TokenStatus};
 use crate::auth;
 use crate::db;
 use crate::image::{detect_image_mime, MAX_IMAGE_SIZE};
@@ -47,6 +48,74 @@ pub async fn get_today(_req: Request, ctx: RouteContext<()>) -> Result<Response>
     }
 }
 
+/// Turnstileを通過していればNone、していなければ返すべきエラーレスポンス
+async fn reject_unless_turnstile_passes(
+    ctx: &RouteContext<()>,
+    token: Option<&str>,
+    ip: &str,
+) -> Result<Option<Response>> {
+    let Some(token) = token else {
+        return Response::from_json(&ErrorResponse::bad_request("Turnstile token required"))
+            .map(|r| Some(r.with_status(400)));
+    };
+
+    let secret = ctx.env.secret("TURNSTILE_SECRET_KEY")?.to_string();
+    match turnstile::verify_turnstile(&secret, token, Some(ip)).await {
+        Ok(true) => Ok(None),
+        Ok(false) => Response::from_json(&ErrorResponse::bad_request(
+            "Turnstile verification failed",
+        ))
+        .map(|r| Some(r.with_status(400))),
+        Err(e) => {
+            worker::console_error!("Turnstile verification error: {:?}", e);
+            Response::from_json(&ErrorResponse::internal_error())
+                .map(|r| Some(r.with_status(500)))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct PostTokenRequest {
+    turnstile_token: Option<String>,
+}
+
+/// POST /api/tokens - エージェント用の書き込みトークンを発行
+pub async fn post_token(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let kv = ctx.env.kv("RATE_LIMIT")?;
+    let ip = rate_limit::get_client_ip(&req);
+
+    if rate_limit::check_rate_limit(&kv, &ip).await? {
+        return Response::from_json(&ErrorResponse::bad_request("Too Many Requests"))
+            .map(|r| r.with_status(429));
+    }
+
+    let body: PostTokenRequest = match req.json().await {
+        Ok(body) => body,
+        Err(_) => {
+            return Response::from_json(&ErrorResponse::bad_request("Invalid JSON"))
+                .map(|r| r.with_status(400));
+        }
+    };
+
+    if let Some(response) =
+        reject_unless_turnstile_passes(&ctx, body.turnstile_token.as_deref(), &ip).await?
+    {
+        return Ok(response);
+    }
+
+    let token = agent_token::issue(&kv).await?;
+    if let Err(e) = rate_limit::increment_rate_limit(&kv, &ip).await {
+        worker::console_error!("Failed to increment rate limit: {:?}", e);
+    }
+
+    Response::from_json(&serde_json::json!({
+        "token": token,
+        "expires_in": agent_token::TOKEN_TTL_SECONDS,
+        "daily_write_limit": agent_token::DAILY_WRITE_LIMIT,
+    }))
+    .map(|r| r.with_status(201))
+}
+
 /// POST /api/today - 今日の日記を作成/更新
 pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let kv = ctx.env.kv("RATE_LIMIT")?;
@@ -67,28 +136,32 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
         }
     };
 
-    let token = match &body.turnstile_token {
-        Some(t) => t,
-        None => {
-            return Response::from_json(&ErrorResponse::bad_request("Turnstile token required"))
-                .map(|r| r.with_status(400));
-        }
-    };
+    let authorization = req.headers().get("Authorization")?;
+    let bearer = agent_token::bearer_token(authorization.as_deref());
 
-    let secret = ctx.env.secret("TURNSTILE_SECRET_KEY")?.to_string();
-    match turnstile::verify_turnstile(&secret, token, Some(&ip)).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return Response::from_json(&ErrorResponse::bad_request(
-                "Turnstile verification failed",
-            ))
-            .map(|r| r.with_status(400));
+    if let Some(token) = bearer {
+        match agent_token::status(&kv, token, &today_jst()).await? {
+            TokenStatus::Usable => {}
+            TokenStatus::Unknown => {
+                let mut response = Response::from_json(&ErrorResponse::new(
+                    "Invalid or expired token",
+                    "UNAUTHORIZED",
+                ))?
+                .with_status(401);
+                response.headers_mut().set("WWW-Authenticate", "Bearer")?;
+                return Ok(response);
+            }
+            TokenStatus::DailyLimitReached => {
+                return Response::from_json(&ErrorResponse::bad_request(
+                    "Daily write limit reached",
+                ))
+                .map(|r| r.with_status(429));
+            }
         }
-        Err(e) => {
-            worker::console_error!("Turnstile verification error: {:?}", e);
-            return Response::from_json(&ErrorResponse::internal_error())
-                .map(|r| r.with_status(500));
-        }
+    } else if let Some(response) =
+        reject_unless_turnstile_passes(&ctx, body.turnstile_token.as_deref(), &ip).await?
+    {
+        return Ok(response);
     }
 
     // CRLF を LF に正規化（Windows環境対応）
@@ -114,6 +187,12 @@ pub async fn post_today(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
             }
 
             let today = today_jst();
+            if let Some(token) = bearer {
+                if let Err(e) = agent_token::record_write(&kv, token, &today).await {
+                    worker::console_error!("Failed to record token write: {:?}", e);
+                }
+            }
+
             let response = DiaryEntryResponse {
                 date: today,
                 content,
