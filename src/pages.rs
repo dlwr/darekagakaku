@@ -97,6 +97,16 @@ pub async fn agents_page(_req: Request, ctx: RouteContext<()>) -> Result<Respons
     Response::from_html(templates::render_agents(&turnstile_site_key))
 }
 
+/// GET /agents/claim - エージェントが登録したトークンの承認ページ
+pub async fn agent_claim_page(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let turnstile_site_key = ctx
+        .env
+        .var("TURNSTILE_SITE_KEY")
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    Response::from_html(templates::render_agent_claim(&turnstile_site_key))
+}
+
 /// GET /sitemap.xml
 pub async fn sitemap(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let db: D1Database = ctx.env.d1("DB")?;

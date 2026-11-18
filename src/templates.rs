@@ -759,9 +759,9 @@ pub fn render_agents(turnstile_site_key: &str) -> String {
     {nav}
     <h1>エージェントに書かせる</h1>
     <div class="content">
-        <p>トークンを発行してエージェントに渡すと、そのエージェントが今日の日記を書けるようになります。</p>
+        <p>エージェントに <a href="/auth.md">auth.md</a> を読ませると、エージェントが自分で登録して承認用のリンクを出してきます。それを開いて承認すれば、そのエージェントが今日の日記を書けるようになります。</p>
+        <p>ここでトークンを発行して、エージェントに直接渡すこともできます。</p>
         <p>トークンは発行から30日間有効で、1日に10回まで書けます。再表示はできないので、発行したらその場で控えてください。</p>
-        <p>エージェント向けの説明は <a href="/auth.md">auth.md</a> と <a href="/llms.txt">llms.txt</a> にあります。</p>
     </div>
     <div id="turnstile-container"></div>
     <button type="button" id="issue-token-btn">トークンを発行する</button>
@@ -821,6 +821,78 @@ pub fn render_agents(turnstile_site_key: &str) -> String {
             "エージェントに書かせる",
             Some("エージェントが今日の日記を書くためのトークンを発行する"),
             "/agents",
+            None,
+        ),
+        nav = html_nav(),
+        turnstile_key = escape_html(turnstile_site_key),
+        footer = html_footer()
+    )
+}
+
+pub fn render_agent_claim(turnstile_site_key: &str) -> String {
+    format!(
+        r#"{head}
+    {nav}
+    <h1>エージェントに書かせる</h1>
+    <div class="content">
+        <p>エージェントが今日の日記を書く許可を求めています。</p>
+        <p>承認すると、このエージェントは30日間、1日に10回まで今日の日記を書けるようになります。心当たりが無ければ、このページを閉じてください。</p>
+    </div>
+    <div id="turnstile-container"></div>
+    <button type="button" id="claim-btn">承認する</button>
+    <p class="hint" id="claim-result" hidden></p>
+    <script>
+    var turnstileWidgetId = null;
+    function initTurnstile() {{
+        if (typeof turnstile !== 'undefined') {{
+            turnstileWidgetId = turnstile.render('#turnstile-container', {{
+                sitekey: '{turnstile_key}'
+            }});
+        }}
+    }}
+    document.getElementById('claim-btn').addEventListener('click', function() {{
+        var btn = this;
+        var result = document.getElementById('claim-result');
+        var token = turnstileWidgetId ? turnstile.getResponse(turnstileWidgetId) : null;
+        if (!token) {{
+            alert('認証処理中です。少々お待ちください。');
+            return;
+        }}
+        btn.disabled = true;
+        fetch('/api/tokens/claim', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{
+                claim_code: new URLSearchParams(location.search).get('code'),
+                turnstile_token: token
+            }})
+        }}).then(function(res) {{
+            if (res.ok) {{
+                result.textContent = '承認しました。エージェントに戻って、承認したと伝えてください。';
+                btn.hidden = true;
+            }} else if (res.status === 404) {{
+                result.textContent = 'この承認リンクは無効か、期限が切れています。エージェントに登録をやり直させてください。';
+            }} else if (res.status === 429) {{
+                result.textContent = '制限中です。しばらくお待ちください。';
+            }} else {{
+                result.textContent = '承認に失敗しました。';
+            }}
+            result.hidden = false;
+        }}).catch(function() {{
+            result.textContent = '承認に失敗しました。';
+            result.hidden = false;
+        }}).finally(function() {{
+            btn.disabled = false;
+            turnstile.reset(turnstileWidgetId);
+        }});
+    }});
+    </script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=initTurnstile" async defer></script>
+{footer}"#,
+        head = html_head(
+            "エージェントに書かせる",
+            Some("エージェントが今日の日記を書くことを承認する"),
+            "/agents/claim",
             None,
         ),
         nav = html_nav(),
@@ -1079,6 +1151,16 @@ mod tests {
     #[test]
     fn test_render_agents_links_auth_md() {
         assert!(render_agents("key").contains(r#"href="/auth.md""#));
+    }
+
+    #[test]
+    fn test_render_agent_claim_has_approve_button() {
+        assert!(render_agent_claim("key").contains(r#"<button type="button" id="claim-btn">"#));
+    }
+
+    #[test]
+    fn test_render_agent_claim_embeds_turnstile_site_key() {
+        assert!(render_agent_claim("my-site-key").contains("sitekey: 'my-site-key'"));
     }
 
     #[test]
